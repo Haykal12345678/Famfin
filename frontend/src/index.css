@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #f8fbff;
+  background-image:
+    radial-gradient(circle at top left, rgba(59, 91, 219, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 22%);
+  color: #0f172a;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  transition: all 0.18s ease;
+}
+
+button:hover,
+button:focus-visible,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+::selection {
+  background: #3b5bdb;
+  color: white;
+}
