@@ -106,6 +106,7 @@ cd famfin
    ```
 6. Ganti bagian `[YOUR-PASSWORD]` dengan password yang tadi Anda buat. Simpan URL ini, akan dipakai di langkah berikutnya.
 
+DB Local
 Password : z7jzyfLqADoWBanQ
 postgresql://postgres:[z7jzyfLqADoWBanQ]@db.bfijzwchpfngbrmskwlz.supabase.co:5432/postgres
 --------------------------------------------------------------------------------
@@ -197,7 +198,7 @@ Sebelum deploy, pastikan alur-alur ini sudah dicoba manual di lokal dan berjalan
 
 Kalau semua checklist di atas jalan lancar, Anda siap deploy ke staging.
 
----
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 <a name="part-c"></a>
 ## 5. PART C — Deploy ke Staging (100% Gratis)
@@ -209,6 +210,10 @@ Stack hosting gratis yang dipakai:
 
 > Catatan: Render free tier akan "tidur" setelah 15 menit tidak ada request, dan butuh ±30 detik untuk bangun lagi saat pertama diakses. Wajar untuk staging/demo.
 
+DB Staging :
+Password : giSVuMmcgXuv5cEM
+postgresql://postgres:[giSVuMmcgXuv5cEM]@db.ldamshkcuearrbckwlku.supabase.co:5432/postgres
+
 ### C.1 Push Kode ke GitHub
 ```bash
 cd famfin
@@ -218,7 +223,7 @@ git commit -m "Initial commit - FamFin MVP"
 ```
 Buat repository baru di [github.com/new](https://github.com/new), beri nama `famfin`, **jangan** centang "Add README" (biar tidak konflik). Lalu:
 ```bash
-git remote add origin https://github.com/<username-anda>/famfin.git
+git remote add origin https://github.com/<username-anda>/famfin.git    https://github.com/Haykal12345678/Famfin.git
 git branch -M main
 git push -u origin main
 ```
@@ -360,3 +365,5 @@ Saat ini kalau `SMTP_HOST` kosong, email reset password hanya tercetak di log se
 ---
 
 Kalau ada langkah yang error saat dijalankan, beri tahu pesan error lengkapnya (dari terminal atau dari tab Logs di Render/Vercel) — akan lebih mudah dibantu debug dari situ.
+
+
