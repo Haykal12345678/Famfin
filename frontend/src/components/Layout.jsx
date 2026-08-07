@@ -8,7 +8,7 @@ import Header from "./Header";
 import Sidebar from "./Sidebar";
 import Footer from "./Footer";
 import LoadingOverlay from "./LoadingOverlay";
-import { menu } from "./menu";
+import { menu } from "./Menu";
 
 export default function Layout({ children }) {
   const { user, tenants, activeTenantId, logout } = useAuth();
