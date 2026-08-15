@@ -29,10 +29,6 @@ export default function Login() {
         <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-6">
           <div className="p-10">
             <div className="mb-8">
-              <div className="inline-flex items-center gap-3 rounded-full bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 shadow-sm">
-                <span>💼</span>
-                FamFin
-              </div>
               <h1 className="mt-6 text-3xl font-bold text-slate-900">Masuk ke Akun Anda</h1>
               <p className="mt-2 text-sm text-slate-500">Kelola keuangan keluarga dengan lebih tenang dan rapi.</p>
             </div>

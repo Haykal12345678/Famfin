@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Wallet,
   TrendingUp,
@@ -6,7 +7,15 @@ import {
   Landmark,
   CalendarDays,
   RefreshCw,
+  ArrowUpRight,
+  ArrowDownRight,
+  CreditCard,
+  PiggyBank,
+  Receipt,
+  Target,
+  AlertCircle,
 } from "lucide-react";
+
 import {
   ResponsiveContainer,
   PieChart,
@@ -26,34 +35,65 @@ import {
 import api from "../api/client";
 import { formatRupiah } from "../utils/format";
 
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const CHART_COLORS = [
+  "#2563eb",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#ec4899",
+  "#14b8a6",
+  "#f97316",
+];
+
+const DEFAULT_DATA = {
+  totalSaldo: 0,
+  totalIncome: 0,
+  totalExpense: 0,
+  cashFlow: 0,
+
+  accounts: [],
+  recentTransactions: [],
+  expenseByCategory: [],
+  expenseByAccount: [],
+
+  budgets: [],
+  savingGoals: [],
+
+  statistics: {
+    categoryCount: 0,
+    transactionCount: 0,
+    budgetCount: 0,
+  },
+};
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+
 export default function Dashboard() {
-  const [data, setData] = useState({
-    totalSaldo: 0,
-    totalIncome: 0,
-    totalExpense: 0,
-    cashFlow: 0,
+  const navigate = useNavigate();
 
-    accounts: [],
-    recentTransactions: [],
-    expenseByCategory: [],
-    expenseByAccount: [],
-
-    budgets: [],
-    savingGoals: [],
-
-    statistics: {
-      categoryCount: 0,
-      transactionCount: 0,
-      budgetCount: 0,
-    },
-  });
+  const [data, setData] = useState(DEFAULT_DATA);
 
   const [period, setPeriod] = useState("this_month");
+
   const [loading, setLoading] = useState(false);
+
+  const [error, setError] = useState("");
+
+  /* =======================================================
+     LOAD DASHBOARD
+  ======================================================= */
 
   const loadDashboard = async () => {
     try {
       setLoading(true);
+      setError("");
 
       const res = await api.get("/dashboard", {
         params: {
@@ -61,7 +101,30 @@ export default function Dashboard() {
         },
       });
 
-      setData(res.data);
+      setData({
+        ...DEFAULT_DATA,
+        ...(res.data || {}),
+
+        accounts: res.data?.accounts || [],
+        recentTransactions: res.data?.recentTransactions || [],
+        expenseByCategory: res.data?.expenseByCategory || [],
+        expenseByAccount: res.data?.expenseByAccount || [],
+
+        budgets: res.data?.budgets || [],
+        savingGoals: res.data?.savingGoals || [],
+
+        statistics: {
+          ...DEFAULT_DATA.statistics,
+          ...(res.data?.statistics || {}),
+        },
+      });
+    } catch (err) {
+      console.error("Dashboard error:", err);
+
+      setError(
+        err.response?.data?.message ||
+          "Gagal memuat dashboard. Silakan coba lagi."
+      );
     } finally {
       setLoading(false);
     }
@@ -71,20 +134,125 @@ export default function Dashboard() {
     loadDashboard();
   }, [period]);
 
-  if (!data && loading) {
+  /* =======================================================
+     HELPERS
+  ======================================================= */
+
+  const getTransactionCategory = (trx) => {
+    if (typeof trx.category === "string") {
+      return trx.category;
+    }
+
+    if (trx.category?.name) {
+      return trx.category.name;
+    }
+
+    return "Tanpa Kategori";
+  };
+
+  const getTransactionDescription = (trx) => {
     return (
-      <div className="flex h-[60vh] items-center justify-center">
-        <div className="text-slate-500">
-          Memuat Dashboard...
-        </div>
-      </div>
+      trx.description ||
+      trx.note ||
+      trx.title ||
+      "Transaksi"
     );
-  }
+  };
+
+  const getTransactionDate = (trx) => {
+    if (trx.date) return trx.date;
+
+    if (trx.transactionDate) {
+      return trx.transactionDate;
+    }
+
+    if (trx.createdAt) {
+      return new Date(trx.createdAt).toLocaleDateString(
+        "id-ID"
+      );
+    }
+
+    return "-";
+  };
+
+  const getExpenseCategoryName = (item) => {
+    if (item.name) return item.name;
+
+    if (item.category?.name) {
+      return item.category.name;
+    }
+
+    if (item.categoryName) {
+      return item.categoryName;
+    }
+
+    return "Tanpa Kategori";
+  };
+
+  const getExpenseCategoryValue = (item) => {
+    return Number(
+      item.total ??
+        item.amount ??
+        item.value ??
+        item.expense ??
+        0
+    );
+  };
+
+  const getExpenseAccountName = (item) => {
+    if (item.name) return item.name;
+
+    if (item.account?.name) {
+      return item.account.name;
+    }
+
+    if (item.accountName) {
+      return item.accountName;
+    }
+
+    return "Rekening";
+  };
+
+  const getExpenseAccountValue = (item) => {
+    return Number(
+      item.total ??
+        item.amount ??
+        item.value ??
+        item.expense ??
+        0
+    );
+  };
+
+  /* =======================================================
+     NORMALIZE CHART DATA
+  ======================================================= */
+
+  const expenseCategoryChartData =
+    (data.expenseByCategory || [])
+      .map((item) => ({
+        name: getExpenseCategoryName(item),
+        total: getExpenseCategoryValue(item),
+      }))
+      .filter((item) => item.total > 0);
+
+  const expenseAccountChartData =
+    (data.expenseByAccount || [])
+      .map((item) => ({
+        name: getExpenseAccountName(item),
+        total: getExpenseAccountValue(item),
+      }))
+      .filter((item) => item.total > 0);
+
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-8">
 
-      {/* ================= HEADER ================= */}
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
 
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
@@ -92,28 +260,40 @@ export default function Dashboard() {
 
           <div>
 
-            <h1 className="text-3xl font-bold text-slate-900">
-              Dashboard
-            </h1>
+            <div className="flex items-center gap-3">
 
-            <p className="mt-2 text-sm text-slate-500">
-              Ringkasan kondisi keuangan keluarga Anda.
-            </p>
+              <div>
+
+                <h1 className="text-2xl font-bold text-slate-00 sm:text-3xl">
+                  Dashboard
+                </h1>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Ringkasan kondisi keuangan keluarga Anda.
+                </p>
+
+              </div>
+
+            </div>
 
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
 
+            {/* PERIOD */}
+
             <div className="relative">
 
               <CalendarDays
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                size={17}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
 
               <select
                 value={period}
-                onChange={(e) => setPeriod(e.target.value)}
+                onChange={(e) =>
+                  setPeriod(e.target.value)
+                }
                 className="
                   rounded-2xl
                   border
@@ -121,13 +301,18 @@ export default function Dashboard() {
                   bg-white
                   py-2.5
                   pl-10
-                  pr-4
+                  pr-8
                   text-sm
+                  font-medium
+                  text-slate-700
                   outline-none
                   transition
                   focus:border-brand-500
+                  focus:ring-2
+                  focus:ring-brand-100
                 "
               >
+
                 <option value="today">
                   Hari Ini
                 </option>
@@ -156,7 +341,10 @@ export default function Dashboard() {
 
             </div>
 
+            {/* REFRESH */}
+
             <button
+              type="button"
               onClick={loadDashboard}
               disabled={loading}
               className="
@@ -167,18 +355,25 @@ export default function Dashboard() {
                 bg-brand-600
                 px-5
                 py-2.5
+                text-sm
+                font-semibold
                 text-white
+                shadow-sm
                 transition
                 hover:bg-brand-700
+                disabled:cursor-not-allowed
                 disabled:opacity-50
               "
             >
+
               <RefreshCw
-                size={18}
-                className={loading ? "animate-spin" : ""}
+                size={17}
+                className={
+                  loading ? "animate-spin" : ""
+                }
               />
 
-              Refresh
+              {loading ? "Memuat..." : "Refresh"}
 
             </button>
 
@@ -188,15 +383,55 @@ export default function Dashboard() {
 
       </div>
 
-      {/* ================= KPI ================= */}
+      {/* =====================================================
+          ERROR
+      ===================================================== */}
 
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      {error && (
+
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
+
+          <AlertCircle
+            size={20}
+            className="mt-0.5 shrink-0 text-red-600"
+          />
+
+          <div className="flex-1">
+
+            <p className="text-sm font-semibold text-red-800">
+              Gagal memuat dashboard
+            </p>
+
+            <p className="mt-1 text-sm text-red-600">
+              {error}
+            </p>
+
+          </div>
+
+          <button
+            type="button"
+            onClick={loadDashboard}
+            className="text-sm font-semibold text-red-700 hover:underline"
+          >
+            Coba Lagi
+          </button>
+
+        </div>
+
+      )}
+
+      {/* =====================================================
+          KPI
+      ===================================================== */}
+
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
 
         <KpiCard
           icon={Wallet}
           title="Total Saldo"
           value={data.totalSaldo}
           color="bg-blue-500"
+          description="Saldo seluruh rekening"
         />
 
         <KpiCard
@@ -204,6 +439,7 @@ export default function Dashboard() {
           title="Total Pemasukan"
           value={data.totalIncome}
           color="bg-emerald-500"
+          description="Pemasukan periode ini"
         />
 
         <KpiCard
@@ -211,6 +447,7 @@ export default function Dashboard() {
           title="Total Pengeluaran"
           value={data.totalExpense}
           color="bg-red-500"
+          description="Pengeluaran periode ini"
         />
 
         <KpiCard
@@ -222,25 +459,32 @@ export default function Dashboard() {
               ? "bg-violet-500"
               : "bg-orange-500"
           }
+          description={
+            data.cashFlow >= 0
+              ? "Arus kas positif"
+              : "Arus kas negatif"
+          }
         />
 
       </div>
-      
-{/* ================= CHART ================= */}
+
+      {/* =====================================================
+          INCOME VS EXPENSE + CASH FLOW
+      ===================================================== */}
 
       <div className="grid gap-6 xl:grid-cols-2">
 
-        {/* Income vs Expense */}
+        {/* INCOME VS EXPENSE */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
           <div className="mb-5">
 
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-lg font-semibold text-slate-900">
               Income vs Expense
             </h2>
 
-            <p className="text-sm text-slate-500">
+            <p className="mt-1 text-sm text-slate-500">
               Perbandingan pemasukan dan pengeluaran.
             </p>
 
@@ -255,36 +499,57 @@ export default function Dashboard() {
               data={[
                 {
                   name: "Periode",
-                  income: data.totalIncome,
-                  expense: data.totalExpense,
+                  income: Number(data.totalIncome || 0),
+                  expense: Number(data.totalExpense || 0),
                 },
               ]}
+              margin={{
+                top: 10,
+                right: 10,
+                left: 10,
+                bottom: 10,
+              }}
             >
 
               <CartesianGrid
                 strokeDasharray="3 3"
+                vertical={false}
               />
 
-              <XAxis dataKey="name" />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 12 }}
+              />
 
-              <YAxis />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) =>
+                  formatRupiah(value)
+                }
+              />
 
               <Tooltip
-                formatter={(v) => formatRupiah(v)}
+                formatter={(value) =>
+                  formatRupiah(value)
+                }
               />
 
               <Legend />
 
               <Bar
                 dataKey="income"
-                radius={[8,8,0,0]}
+                name="Pemasukan"
                 fill="#10b981"
+                radius={[8, 8, 0, 0]}
+                maxBarSize={70}
               />
 
               <Bar
                 dataKey="expense"
-                radius={[8,8,0,0]}
+                name="Pengeluaran"
                 fill="#ef4444"
+                radius={[8, 8, 0, 0]}
+                maxBarSize={70}
               />
 
             </BarChart>
@@ -293,19 +558,39 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Cash Flow */}
+        {/* CASH FLOW */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
-          <div className="mb-5">
+          <div className="mb-5 flex items-start justify-between">
 
-            <h2 className="text-lg font-semibold">
-              Cash Flow
-            </h2>
+            <div>
 
-            <p className="text-sm text-slate-500">
-              Ringkasan arus kas.
-            </p>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Cash Flow
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Ringkasan arus kas periode terpilih.
+              </p>
+
+            </div>
+
+            <div
+              className={`rounded-xl p-2 ${
+                data.cashFlow >= 0
+                  ? "bg-emerald-50 text-emerald-600"
+                  : "bg-red-50 text-red-600"
+              }`}
+            >
+
+              {data.cashFlow >= 0 ? (
+                <ArrowUpRight size={19} />
+              ) : (
+                <ArrowDownRight size={19} />
+              )}
+
+            </div>
 
           </div>
 
@@ -318,15 +603,21 @@ export default function Dashboard() {
               data={[
                 {
                   name: "Cash Flow",
-                  value: data.cashFlow,
+                  value: Number(data.cashFlow || 0),
                 },
               ]}
+              margin={{
+                top: 10,
+                right: 10,
+                left: 10,
+                bottom: 10,
+              }}
             >
 
               <defs>
 
                 <linearGradient
-                  id="cash"
+                  id="cashFlowGradient"
                   x1="0"
                   y1="0"
                   x2="0"
@@ -336,7 +627,7 @@ export default function Dashboard() {
                   <stop
                     offset="0%"
                     stopColor="#2563eb"
-                    stopOpacity={0.8}
+                    stopOpacity={0.35}
                   />
 
                   <stop
@@ -349,21 +640,36 @@ export default function Dashboard() {
 
               </defs>
 
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                vertical={false}
+              />
 
-              <XAxis dataKey="name" />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 12 }}
+              />
 
-              <YAxis />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) =>
+                  formatRupiah(value)
+                }
+              />
 
               <Tooltip
-                formatter={(v) => formatRupiah(v)}
+                formatter={(value) =>
+                  formatRupiah(value)
+                }
               />
 
               <Area
                 type="monotone"
                 dataKey="value"
+                name="Cash Flow"
                 stroke="#2563eb"
-                fill="url(#cash)"
+                strokeWidth={3}
+                fill="url(#cashFlowGradient)"
               />
 
             </AreaChart>
@@ -374,76 +680,150 @@ export default function Dashboard() {
 
       </div>
 
-{/* ================= LOWER SECTION ================= */}
+      {/* =====================================================
+          EXPENSE DISTRIBUTION
+      ===================================================== */}
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid gap-6 xl:grid-cols-2">
 
-        {/* Recent Transaction */}
+        {/* EXPENSE BY CATEGORY */}
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-5">
 
-            <h2 className="text-lg font-semibold">
-              Transaksi Terakhir
+            <h2 className="text-lg font-semibold text-slate-900">
+              Distribusi Pengeluaran
             </h2>
 
-            <button className="text-sm font-medium text-brand-600 hover:underline">
-              Lihat Semua
-            </button>
+            <p className="mt-1 text-sm text-slate-500">
+              Kategori yang paling banyak menyerap pengeluaran.
+            </p>
 
           </div>
 
-          {!data.recentTransactions ||
-          data.recentTransactions.length === 0 ? (
+          {expenseCategoryChartData.length === 0 ? (
 
-            <EmptyState text="Belum ada transaksi." />
+            <EmptyState
+              icon={Receipt}
+              text="Belum ada data pengeluaran."
+            />
 
           ) : (
 
-            <div className="space-y-3">
+            <div className="grid gap-5 md:grid-cols-2">
 
-              {data.recentTransactions.map((trx) => (
+              {/* PIE */}
 
-                <div
-                  key={trx.id}
-                  className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4"
+              <div className="h-[280px]">
+
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
                 >
 
-                  <div>
+                  <PieChart>
 
-                    <p className="font-semibold">
-                      {trx.description}
-                    </p>
-
-                    <p className="text-sm text-slate-500">
-                      {trx.category}
-                    </p>
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p
-                      className={`font-semibold ${
-                        trx.type === "INCOME"
-                          ? "text-emerald-600"
-                          : "text-red-500"
-                      }`}
+                    <Pie
+                      data={expenseCategoryChartData}
+                      dataKey="total"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={62}
+                      outerRadius={100}
+                      paddingAngle={3}
                     >
-                      {trx.type === "INCOME" ? "+" : "-"}
-                      {formatRupiah(trx.amount)}
-                    </p>
 
-                    <p className="text-xs text-slate-400">
-                      {trx.date}
-                    </p>
+                      {expenseCategoryChartData.map(
+                        (_, index) => (
 
-                  </div>
+                          <Cell
+                            key={`category-${index}`}
+                            fill={
+                              CHART_COLORS[
+                                index %
+                                  CHART_COLORS.length
+                              ]
+                            }
+                          />
 
-                </div>
+                        )
+                      )}
 
-              ))}
+                    </Pie>
+
+                    <Tooltip
+                      formatter={(value) =>
+                        formatRupiah(value)
+                      }
+                    />
+
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      wrapperStyle={{
+                        fontSize: "12px",
+                      }}
+                    />
+
+                  </PieChart>
+
+                </ResponsiveContainer>
+
+              </div>
+
+              {/* CATEGORY LIST */}
+
+              <div className="flex flex-col justify-center space-y-2">
+
+                {expenseCategoryChartData
+                  .slice(0, 6)
+                  .map((item, index) => (
+
+                    <div
+                      key={`${item.name}-${index}`}
+                      className="
+                        flex
+                        items-center
+                        justify-between
+                        rounded-2xl
+                        bg-slate-50
+                        px-4
+                        py-3
+                        transition
+                        hover:bg-slate-100
+                      "
+                    >
+
+                      <div className="flex min-w-0 items-center gap-3">
+
+                        <span
+                          className="h-3 w-3 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor:
+                              CHART_COLORS[
+                                index %
+                                  CHART_COLORS.length
+                              ],
+                          }}
+                        />
+
+                        <span className="truncate text-sm font-medium text-slate-700">
+                          {item.name}
+                        </span>
+
+                      </div>
+
+                      <span className="ml-3 whitespace-nowrap text-sm font-semibold text-slate-900">
+                        {formatRupiah(item.total)}
+                      </span>
+
+                    </div>
+
+                  ))}
+
+              </div>
 
             </div>
 
@@ -451,34 +831,275 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Quick Statistic */}
+        {/* EXPENSE BY ACCOUNT */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
-          <h2 className="mb-5 text-lg font-semibold">
+          <div className="mb-5">
+
+            <h2 className="text-lg font-semibold text-slate-900">
+              Pengeluaran per Rekening
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Rekening yang paling banyak digunakan untuk pengeluaran.
+            </p>
+
+          </div>
+
+          {expenseAccountChartData.length === 0 ? (
+
+            <EmptyState
+              icon={CreditCard}
+              text="Belum ada data pengeluaran per rekening."
+            />
+
+          ) : (
+
+            <div className="h-[320px]">
+
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
+              >
+
+                <BarChart
+                  data={expenseAccountChartData}
+                  layout="vertical"
+                  margin={{
+                    top: 10,
+                    right: 20,
+                    left: 10,
+                    bottom: 10,
+                  }}
+                >
+
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    horizontal={false}
+                  />
+
+                  <XAxis
+                    type="number"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(value) =>
+                      formatRupiah(value)
+                    }
+                  />
+
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={90}
+                    tick={{ fontSize: 11 }}
+                  />
+
+                  <Tooltip
+                    formatter={(value) =>
+                      formatRupiah(value)
+                    }
+                  />
+
+                  <Bar
+                    dataKey="total"
+                    name="Pengeluaran"
+                    fill="#ef4444"
+                    radius={[0, 8, 8, 0]}
+                  />
+
+                </BarChart>
+
+              </ResponsiveContainer>
+
+            </div>
+
+          )}
+
+        </div>
+
+      </div>
+
+      {/* =====================================================
+          RECENT TRANSACTIONS + STATISTICS
+      ===================================================== */}
+
+      <div className="grid gap-6 xl:grid-cols-3">
+
+        {/* RECENT TRANSACTION */}
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
+
+          <div className="mb-5 flex items-center justify-between">
+
+            <div>
+
+              <h2 className="text-lg font-semibold text-slate-900">
+                Transaksi Terakhir
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Aktivitas transaksi terbaru.
+              </p>
+
+            </div>
+
+          </div>
+
+          {!data.recentTransactions ||
+          data.recentTransactions.length === 0 ? (
+
+            <EmptyState
+              icon={Receipt}
+              text="Belum ada transaksi."
+            />
+
+          ) : (
+
+            <div className="space-y-3">
+
+              {data.recentTransactions
+                .slice(0, 8)
+                .map((trx) => {
+
+                  const isIncome =
+                    trx.type === "INCOME";
+
+                  return (
+
+                    <div
+                      key={trx.id}
+                      className="
+                        flex
+                        items-center
+                        justify-between
+                        gap-4
+                        rounded-2xl
+                        border
+                        border-slate-100
+                        bg-slate-50
+                        p-4
+                        transition
+                        hover:border-slate-200
+                        hover:bg-white
+                      "
+                    >
+
+                      <div className="flex min-w-0 items-center gap-3">
+
+                        <div
+                          className={`
+                            flex
+                            h-10
+                            w-10
+                            shrink-0
+                            items-center
+                            justify-center
+                            rounded-xl
+                            ${
+                              isIncome
+                                ? "bg-emerald-100 text-emerald-600"
+                                : "bg-red-100 text-red-600"
+                            }
+                          `}
+                        >
+
+                          {isIncome ? (
+                            <ArrowUpRight size={19} />
+                          ) : (
+                            <ArrowDownRight size={19} />
+                          )}
+
+                        </div>
+
+                        <div className="min-w-0">
+
+                          <p className="truncate font-semibold text-slate-800">
+                            {getTransactionDescription(trx)}
+                          </p>
+
+                          <p className="mt-0.5 truncate text-xs text-slate-500">
+                            {getTransactionCategory(trx)}
+                          </p>
+
+                        </div>
+
+                      </div>
+
+                      <div className="shrink-0 text-right">
+
+                        <p
+                          className={`font-semibold ${
+                            isIncome
+                              ? "text-emerald-600"
+                              : "text-red-500"
+                          }`}
+                        >
+                          {isIncome ? "+" : "-"}
+                          {formatRupiah(
+                            trx.amount || 0
+                          )}
+                        </p>
+
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          {getTransactionDate(trx)}
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  );
+                })}
+
+            </div>
+
+          )}
+
+        </div>
+
+        {/* STATISTICS */}
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+          <h2 className="mb-5 text-lg font-semibold text-slate-900">
             Statistik
           </h2>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
 
             <StatisticCard
+              icon={CreditCard}
               title="Total Rekening"
-              value={data.accounts?.length || 0}
+              value={
+                data.accounts?.length || 0
+              }
             />
 
             <StatisticCard
+              icon={Receipt}
               title="Kategori"
-              value={data.statistics?.categoryCount || 0}
+              value={
+                data.statistics
+                  ?.categoryCount || 0
+              }
             />
 
             <StatisticCard
+              icon={TrendingUp}
               title="Transaksi"
-              value={data.statistics?.transactionCount || 0}
+              value={
+                data.statistics
+                  ?.transactionCount || 0
+              }
             />
 
             <StatisticCard
+              icon={Target}
               title="Budget Aktif"
-              value={data.statistics?.budgetCount || 0}
+              value={
+                data.statistics
+                  ?.budgetCount || 0
+              }
             />
 
           </div>
@@ -487,22 +1108,44 @@ export default function Dashboard() {
 
       </div>
 
-{/* ================= BUDGET & SAVING ================= */}
+      {/* =====================================================
+          BUDGET + SAVING GOALS
+      ===================================================== */}
 
       <div className="grid gap-6 xl:grid-cols-2">
 
-        {/* Budget */}
+        {/* BUDGET */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
-          <h2 className="mb-5 text-lg font-semibold">
-            Budget Bulan Ini
-          </h2>
+          <div className="mb-5 flex items-center justify-between">
+
+            <div>
+
+              <h2 className="text-lg font-semibold text-slate-900">
+                Budget Bulan Ini
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Pantau penggunaan budget keluarga.
+              </p>
+
+            </div>
+
+            <Target
+              size={20}
+              className="text-brand-600"
+            />
+
+          </div>
 
           {!data.budgets ||
           data.budgets.length === 0 ? (
 
-            <EmptyState text="Belum ada budget." />
+            <EmptyState
+              icon={Target}
+              text="Belum ada budget."
+            />
 
           ) : (
 
@@ -510,32 +1153,63 @@ export default function Dashboard() {
 
               {data.budgets.map((budget) => {
 
+                const limit = Number(
+                  budget.limit ??
+                    budget.amount ??
+                    0
+                );
+
+                const used = Number(
+                  budget.used || 0
+                );
+
                 const percent =
-                  Math.min(
-                    100,
-                    (budget.used / budget.limit) * 100
-                  );
+                  limit > 0
+                    ? Math.min(
+                        100,
+                        (used / limit) * 100
+                      )
+                    : 0;
+
+                const isDanger =
+                  percent >= 90;
 
                 return (
 
                   <div key={budget.id}>
 
-                    <div className="mb-2 flex justify-between">
+                    <div className="mb-2 flex items-center justify-between gap-3">
 
-                      <span className="font-medium">
-                        {budget.name}
+                      <span className="truncate font-medium text-slate-800">
+                        {budget.name ||
+                          budget.category?.name ||
+                          "Budget"}
                       </span>
 
-                      <span className="text-sm text-slate-500">
+                      <span
+                        className={`shrink-0 text-sm font-semibold ${
+                          isDanger
+                            ? "text-red-600"
+                            : "text-slate-500"
+                        }`}
+                      >
                         {Math.round(percent)}%
                       </span>
 
                     </div>
 
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
 
                       <div
-                        className="h-full rounded-full bg-brand-600"
+                        className={`h-full rounded-full transition-all ${
+                          percent >= 100
+                            ? "bg-red-500"
+                            : percent >= 90
+                            ? "bg-orange-500"
+                            : percent >= 70
+                            ? "bg-yellow-500"
+                            : "bg-brand-600"
+                        }`}
                         style={{
                           width: `${percent}%`,
                         }}
@@ -543,11 +1217,17 @@ export default function Dashboard() {
 
                     </div>
 
-                    <div className="mt-2 text-sm text-slate-500">
+                    <div className="mt-2 flex justify-between text-xs text-slate-500">
 
-                      {formatRupiah(budget.used)} /
-                      {" "}
-                      {formatRupiah(budget.limit)}
+                      <span>
+                        Terpakai{" "}
+                        {formatRupiah(used)}
+                      </span>
+
+                      <span>
+                        dari{" "}
+                        {formatRupiah(limit)}
+                      </span>
 
                     </div>
 
@@ -563,18 +1243,38 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Saving */}
+        {/* SAVING GOALS */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
-          <h2 className="mb-5 text-lg font-semibold">
-            Target Tabungan
-          </h2>
+          <div className="mb-5 flex items-center justify-between">
+
+            <div>
+
+              <h2 className="text-lg font-semibold text-slate-900">
+                Target Tabungan
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Pantau progress target tabungan keluarga.
+              </p>
+
+            </div>
+
+            <PiggyBank
+              size={20}
+              className="text-emerald-600"
+            />
+
+          </div>
 
           {!data.savingGoals ||
           data.savingGoals.length === 0 ? (
 
-            <EmptyState text="Belum ada target tabungan." />
+            <EmptyState
+              icon={PiggyBank}
+              text="Belum ada target tabungan."
+            />
 
           ) : (
 
@@ -582,32 +1282,47 @@ export default function Dashboard() {
 
               {data.savingGoals.map((goal) => {
 
+                const target = Number(
+                  goal.target ??
+                    goal.targetAmount ??
+                    0
+                );
+
+                const saved = Number(
+                  goal.saved ??
+                    goal.currentAmount ??
+                    0
+                );
+
                 const percent =
-                  Math.min(
-                    100,
-                    (goal.saved / goal.target) * 100
-                  );
+                  target > 0
+                    ? Math.min(
+                        100,
+                        (saved / target) * 100
+                      )
+                    : 0;
 
                 return (
 
                   <div key={goal.id}>
 
-                    <div className="mb-2 flex justify-between">
+                    <div className="mb-2 flex items-center justify-between gap-3">
 
-                      <span className="font-medium">
-                        {goal.name}
+                      <span className="truncate font-medium text-slate-800">
+                        {goal.name ||
+                          "Target Tabungan"}
                       </span>
 
-                      <span className="text-sm text-slate-500">
+                      <span className="shrink-0 text-sm font-semibold text-emerald-600">
                         {Math.round(percent)}%
                       </span>
 
                     </div>
 
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
 
                       <div
-                        className="h-full rounded-full bg-emerald-500"
+                        className="h-full rounded-full bg-emerald-500 transition-all"
                         style={{
                           width: `${percent}%`,
                         }}
@@ -615,11 +1330,17 @@ export default function Dashboard() {
 
                     </div>
 
-                    <div className="mt-2 text-sm text-slate-500">
+                    <div className="mt-2 flex justify-between text-xs text-slate-500">
 
-                      {formatRupiah(goal.saved)} /
-                      {" "}
-                      {formatRupiah(goal.target)}
+                      <span>
+                        Terkumpul{" "}
+                        {formatRupiah(saved)}
+                      </span>
+
+                      <span>
+                        dari{" "}
+                        {formatRupiah(target)}
+                      </span>
 
                     </div>
 
@@ -636,15 +1357,21 @@ export default function Dashboard() {
         </div>
 
       </div>
+
     </div>
   );
 }
+
+/* =========================================================
+   KPI CARD
+========================================================= */
 
 function KpiCard({
   icon: Icon,
   title,
   value,
   color,
+  description,
 }) {
   return (
     <div
@@ -654,42 +1381,54 @@ function KpiCard({
         border
         border-slate-200
         bg-white
-        p-6
+        p-5
         shadow-sm
         transition-all
         duration-300
         hover:-translate-y-1
-        hover:shadow-xl
+        hover:shadow-lg
       "
     >
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
 
-        <div>
+        <div className="min-w-0">
 
-          <p className="text-sm text-slate-500">
+          <p className="text-sm font-medium text-slate-500">
             {title}
           </p>
 
-          <h2 className="mt-2 text-2xl font-bold text-slate-900">
+          <h2 className="mt-2 truncate text-xl font-bold text-slate-900 sm:text-2xl">
             {formatRupiah(value || 0)}
           </h2>
+
+          {description && (
+            <p className="mt-2 text-xs text-slate-400">
+              {description}
+            </p>
+          )}
 
         </div>
 
         <div
           className={`
             flex
-            h-14
-            w-14
+            h-12
+            w-12
+            shrink-0
             items-center
             justify-center
             rounded-2xl
             text-white
+            shadow-sm
+            transition-transform
+            group-hover:scale-105
             ${color}
           `}
         >
-          <Icon size={26} />
+
+          <Icon size={23} />
+
         </div>
 
       </div>
@@ -697,16 +1436,45 @@ function KpiCard({
     </div>
   );
 }
+
+/* =========================================================
+   STATISTIC CARD
+========================================================= */
+
 function StatisticCard({
+  icon: Icon,
   title,
   value,
 }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 p-4">
+    <div
+      className="
+        flex
+        items-center
+        justify-between
+        rounded-2xl
+        border
+        border-slate-100
+        bg-slate-50
+        p-4
+        transition
+        hover:bg-slate-100
+      "
+    >
 
-      <p className="text-slate-600">
-        {title}
-      </p>
+      <div className="flex items-center gap-3">
+
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm">
+
+          <Icon size={17} />
+
+        </div>
+
+        <p className="text-sm font-medium text-slate-600">
+          {title}
+        </p>
+
+      </div>
 
       <span className="text-xl font-bold text-brand-600">
         {value}
@@ -715,12 +1483,28 @@ function StatisticCard({
     </div>
   );
 }
-function EmptyState({ text }) {
+
+/* =========================================================
+   EMPTY STATE
+========================================================= */
+
+function EmptyState({
+  icon: Icon = Receipt,
+  text,
+}) {
   return (
-    <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
+    <div className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
+
+      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-400 shadow-sm">
+
+        <Icon size={21} />
+
+      </div>
+
       <p className="text-sm text-slate-400">
         {text}
       </p>
+
     </div>
   );
 }

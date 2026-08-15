@@ -78,7 +78,7 @@ export default function Sidebar({
               </p>
             </div>
           ) : (
-            <div className="text-3xl">💰</div>
+            <div className="text-3xl"></div>
           )}
 
           {/* Mobile Close */}

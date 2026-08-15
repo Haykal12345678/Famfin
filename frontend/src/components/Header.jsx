@@ -153,7 +153,7 @@ export default function Header({
           >
             <User size={18} />
           </div>
-
+          
         </div>
 
       </div>

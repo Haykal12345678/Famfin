@@ -47,3 +47,34 @@ button:hover {
   background: #3b5bdb;
   color: white;
 }
+
+.category-input {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(226 232 240);
+  background: white;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  color: rgb(30 41 59);
+  outline: none;
+  transition: all 150ms ease;
+}
+
+.category-input::placeholder {
+  color: rgb(148 163 184);
+}
+
+.category-input:hover {
+  border-color: rgb(203 213 225);
+}
+
+.category-input:focus {
+  border-color: rgb(59 130 246);
+  box-shadow: 0 0 0 4px rgb(239 246 255);
+}
+
+.category-input:disabled {
+  cursor: not-allowed;
+  background: rgb(248 250 252);
+  color: rgb(148 163 184);
+}
