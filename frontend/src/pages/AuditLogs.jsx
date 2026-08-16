@@ -137,7 +137,7 @@ export default function AuditLogs() {
       <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <div className="flex items-center gap-3">\
+            <div className="flex items-center gap-3">
 
               <div>
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">
