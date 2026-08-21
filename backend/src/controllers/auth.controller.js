@@ -306,7 +306,7 @@ const register = asyncHandler(
             'Bonus',
             'Freelance',
             'Bisnis',
-            'Investasi',
+            'Investasi', 
             'Hadiah',
             'Lainnya',
           ];

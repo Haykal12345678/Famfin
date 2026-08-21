@@ -45,7 +45,7 @@ async function requireAuth(
     |--------------------------------------------------------------------------
     */
 
-    const header =
+    const header = 
       req.headers.authorization || '';
 
     const token =
