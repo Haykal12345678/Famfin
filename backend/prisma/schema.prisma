@@ -1,8 +1,3 @@
-// ============================================================
-// FamFin - Sistem Monitor Keuangan Keluarga
-// Prisma Schema (PostgreSQL)
-// ============================================================
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,7 +8,209 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ---------------- ENUMS ----------------
+model User {
+  id                  String               @id @default(uuid())
+  name                String
+  email               String               @unique
+  passwordHash        String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  sessions            UserSession[]
+  accountAccesses     AccountAccess[]
+  auditLogs           AuditLog[]
+  memberships         Membership[]
+  passwordResetTokens PasswordResetToken[]
+  transactions        Transaction[]
+
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model Tenant {
+  id           String          @id @default(uuid())
+  name         String
+  logoUrl      String?
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  accounts     Account[]
+  auditLogs    AuditLog[]
+  budgets      Budget[]
+  categories   Category[]
+  goals        FinancialGoal[]
+  memberships  Membership[]
+  transactions Transaction[]
+
+  @@map("tenants")
+}
+
+model Membership {
+  id        String           @id @default(uuid())
+  userId    String
+  tenantId  String
+  role      Role             @default(MEMBER)
+  status    MembershipStatus @default(PENDING)
+  invitedAt DateTime         @default(now())
+  joinedAt  DateTime?
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@map("memberships")
+}
+
+model Account {
+  id                 String          @id @default(uuid())
+  tenantId           String
+  name               String
+  type               AccountType
+  accountNumber      String?
+  initialBalance     Decimal         @default(0) @db.Decimal(18, 2)
+  initialBalanceDate DateTime
+  currentBalance     Decimal         @default(0) @db.Decimal(18, 2)
+  description        String?
+  isActive           Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  accesses           AccountAccess[]
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  goals              FinancialGoal[]
+  outgoingTx         Transaction[]   @relation("SourceAccount")
+  incomingTransfers  Transaction[]   @relation("DestinationAccount")
+
+  @@unique([tenantId, name])
+  @@map("accounts")
+}
+
+model AccountAccess {
+  id          String  @id @default(uuid())
+  accountId   String
+  userId      String
+  canView     Boolean @default(true)
+  canCreateTx Boolean @default(false)
+  canEditTx   Boolean @default(false)
+  canDeleteTx Boolean @default(false)
+  canManage   Boolean @default(false)
+  account     Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, userId])
+  @@map("account_accesses")
+}
+
+model Category {
+  id           String        @id @default(uuid())
+  tenantId     String
+  name         String
+  type         CategoryType
+  isDefault    Boolean       @default(false)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  budgets      Budget[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@unique([tenantId, name, type])
+  @@map("categories")
+}
+
+model Transaction {
+  id              String          @id @default(uuid())
+  tenantId        String
+  type            TransactionType
+  accountId       String
+  toAccountId     String?
+  categoryId      String?
+  amount          Decimal         @db.Decimal(18, 2)
+  date            DateTime
+  note            String?
+  userId          String
+  transferGroupId String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  account         Account         @relation("SourceAccount", fields: [accountId], references: [id])
+  category        Category?       @relation(fields: [categoryId], references: [id])
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  toAccount       Account?        @relation("DestinationAccount", fields: [toAccountId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, date])
+  @@index([accountId])
+  @@map("transactions")
+}
+
+model Budget {
+  id         String   @id @default(uuid())
+  tenantId   String
+  categoryId String
+  period     String
+  amount     Decimal  @db.Decimal(18, 2)
+  createdAt  DateTime @default(now())
+  category   Category @relation(fields: [categoryId], references: [id])
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, categoryId, period])
+  @@map("budgets")
+}
+
+model FinancialGoal {
+  id            String   @id @default(uuid())
+  tenantId      String
+  name          String
+  targetAmount  Decimal  @db.Decimal(18, 2)
+  initialAmount Decimal  @default(0) @db.Decimal(18, 2)
+  currentAmount Decimal  @default(0) @db.Decimal(18, 2)
+  targetDate    DateTime
+  accountId     String
+  description   String?
+  createdAt     DateTime @default(now())
+  account       Account  @relation(fields: [accountId], references: [id])
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("financial_goals")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  action    String
+  module    String
+  recordId  String
+  oldValue  Json?
+  newValue  Json?
+  timestamp DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, timestamp])
+  @@map("audit_logs")
+}
+
+model UserSession {
+  id           String   @id @default(cuid())
+  userId       String
+  tokenId      String   @unique
+  lastActivity DateTime @default(now())
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
 
 enum Role {
   OWNER
@@ -45,245 +242,4 @@ enum TransactionType {
   INCOME
   EXPENSE
   TRANSFER
-}
-
-// ---------------- CORE ----------------
-
-model User {
-  id            String   @id @default(uuid())
-  name          String
-  email         String   @unique
-  passwordHash  String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  memberships       Membership[]
-  accountAccesses   AccountAccess[]
-  transactions      Transaction[]
-  auditLogs         AuditLog[]
-  passwordResetTokens PasswordResetToken[] 
-  sessions UserSession[]
-
-  @@map("users")
-}
-
-// Token untuk fitur lupa password (dikirim via email pada implementasi production)
-model PasswordResetToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("password_reset_tokens")
-}
-
-model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  logoUrl   String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  memberships  Membership[]
-  accounts     Account[]
-  categories   Category[]
-  transactions Transaction[]
-  budgets      Budget[]
-  goals        FinancialGoal[]
-  auditLogs    AuditLog[]
-
-  @@map("tenants")
-}
-
-// Menghubungkan User <-> Tenant beserta role & status (anggota keluarga)
-model Membership {
-  id        String           @id @default(uuid())
-  userId    String
-  tenantId  String
-  role      Role             @default(MEMBER)
-  status    MembershipStatus @default(PENDING)
-  invitedAt DateTime         @default(now())
-  joinedAt  DateTime?
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, tenantId])
-  @@map("memberships")
-}
-
-// ---------------- ACCOUNTS ----------------
-
-model Account {
-  id                String      @id @default(uuid())
-  tenantId          String
-  name              String
-  type              AccountType
-  accountNumber     String?
-  initialBalance    Decimal     @default(0) @db.Decimal(18, 2)
-  initialBalanceDate DateTime
-  currentBalance    Decimal     @default(0) @db.Decimal(18, 2)
-  description       String?
-  isActive          Boolean     @default(true)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  accesses          AccountAccess[]
-  outgoingTx        Transaction[]  @relation("SourceAccount")
-  incomingTransfers Transaction[]  @relation("DestinationAccount")
-  goals             FinancialGoal[]
-
-  @@unique([tenantId, name])
-  @@map("accounts")
-}
-
-model AccountAccess {
-  id              String  @id @default(uuid())
-  accountId       String
-  userId          String
-  canView         Boolean @default(true)
-  canCreateTx     Boolean @default(false)
-  canEditTx       Boolean @default(false)
-  canDeleteTx     Boolean @default(false)
-  canManage       Boolean @default(false)
-
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([accountId, userId])
-  @@map("account_accesses")
-}
-
-// ---------------- CATEGORY ----------------
-
-model Category {
-  id        String       @id @default(uuid())
-  tenantId  String
-  name      String
-  type      CategoryType
-  isDefault Boolean      @default(false)
-  isActive  Boolean      @default(true)
-  createdAt DateTime     @default(now())
-
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
-  budgets      Budget[]
-
-  @@unique([tenantId, name, type])
-  @@map("categories")
-}
-
-// ---------------- TRANSACTION ----------------
-// Income & Expense pakai accountId sebagai rekening terkait.
-// Transfer pakai accountId (sumber) + toAccountId (tujuan), dua baris transaksi
-// digabungkan lewat transferGroupId agar bisa dibatalkan bersamaan.
-
-model Transaction {
-  id             String          @id @default(uuid())
-  tenantId       String
-  type           TransactionType
-  accountId      String
-  toAccountId    String?
-  categoryId     String?
-  amount         Decimal         @db.Decimal(18, 2)
-  date           DateTime
-  note           String?
-  userId         String
-  transferGroupId String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-
-  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  account    Account   @relation("SourceAccount", fields: [accountId], references: [id])
-  toAccount  Account?  @relation("DestinationAccount", fields: [toAccountId], references: [id])
-  category   Category? @relation(fields: [categoryId], references: [id])
-  user       User      @relation(fields: [userId], references: [id])
-
-  @@index([tenantId, date])
-  @@index([accountId])
-  @@map("transactions")
-}
-
-// ---------------- BUDGET ----------------
-
-model Budget {
-  id         String   @id @default(uuid())
-  tenantId   String
-  categoryId String
-  period     String   // format "YYYY-MM"
-  amount     Decimal  @db.Decimal(18, 2)
-  createdAt  DateTime @default(now())
-
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category Category @relation(fields: [categoryId], references: [id])
-
-  @@unique([tenantId, categoryId, period])
-  @@map("budgets")
-}
-
-// ---------------- FINANCIAL GOAL ----------------
-
-model FinancialGoal {
-  id             String    @id @default(uuid())
-  tenantId       String
-  name           String
-  targetAmount   Decimal   @db.Decimal(18, 2)
-  initialAmount  Decimal   @default(0) @db.Decimal(18, 2)
-  currentAmount  Decimal   @default(0) @db.Decimal(18, 2)
-  targetDate     DateTime
-  accountId      String
-  description    String?
-  createdAt      DateTime  @default(now())
-
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  account Account @relation(fields: [accountId], references: [id])
-
-  @@map("financial_goals")
-}
-
-// ---------------- AUDIT LOG ----------------
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  tenantId  String
-  userId    String
-  action    String   // CREATE / UPDATE / DELETE
-  module    String   // e.g. "Transaction", "Account", "Budget"
-  recordId  String
-  oldValue  Json?
-  newValue  Json?
-  timestamp DateTime @default(now())
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id])
-
-  @@index([tenantId, timestamp])
-  @@map("audit_logs")
-}
-
-model UserSession {
-  id           String   @id @default(cuid())
-
-  userId       String
-
-  tokenId      String   @unique
-
-  lastActivity DateTime @default(now())
-
-  expiresAt    DateTime
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([expiresAt])
 }

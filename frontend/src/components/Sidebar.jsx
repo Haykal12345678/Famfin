@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import {Building2, LogOut, X} from "lucide-react";
+import { Building2, LogOut, X } from "lucide-react";
 
 export default function Sidebar({
   open,
@@ -12,6 +12,7 @@ export default function Sidebar({
   onLogout,
   handleSidebarMouseEnter,
   handleSidebarMouseLeave,
+  onLogoutConfirm,
 }) {
   return (
     <>
@@ -78,13 +79,27 @@ export default function Sidebar({
               </p>
             </div>
           ) : (
-            <div className="text-3xl"></div>
+            <div className="text-3xl">
+              F
+            </div>
           )}
 
           {/* Mobile Close */}
           <button
+            type="button"
             onClick={() => setMobileOpen(false)}
-            className="absolute right-4 flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white/10 lg:hidden"
+            className="
+              absolute
+              right-4
+              flex
+              h-10
+              w-10
+              items-center
+              justify-center
+              rounded-xl
+              hover:bg-white/10
+              lg:hidden
+            "
           >
             <X size={18} />
           </button>
@@ -125,7 +140,12 @@ export default function Sidebar({
               >
                 <Icon
                   size={20}
-                  className="shrink-0 transition-transform duration-200 group-hover:scale-110"
+                  className="
+                    shrink-0
+                    transition-transform
+                    duration-200
+                    group-hover:scale-110
+                  "
                 />
 
                 {open && (
@@ -140,10 +160,19 @@ export default function Sidebar({
 
         {/* Footer */}
         <div className="mt-auto border-t border-white/10 p-4">
+          {/* User / Tenant */}
           {open && (
             <div className="mb-4 rounded-xl bg-white/10 p-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20">
+                <div className="
+                  flex
+                  h-11
+                  w-11
+                  items-center
+                  justify-center
+                  rounded-full
+                  bg-white/20
+                ">
                   <Building2 size={20} />
                 </div>
 
@@ -164,8 +193,10 @@ export default function Sidebar({
             </div>
           )}
 
+          {/* Logout */}
           <button
-            onClick={onLogout}
+            type="button"
+            onClick={onLogoutConfirm}
             className={`
               flex
               w-full
