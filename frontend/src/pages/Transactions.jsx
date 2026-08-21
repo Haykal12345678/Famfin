@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api/client';
-import { formatRupiah } from '../utils/format';
-import Pagination from '../components/Pagination';
 
-/* =========================================================
-   CONSTANT
-========================================================= */
+import ConfirmModal from '../components/ConfirmModal';
+import LoadingOverlay from '../components/LoadingOverlay';
+import Pagination from '../components/Pagination';
+import { formatRupiah } from '../utils/format';
+
+
+// =========================================================
+// CONSTANT
+// =========================================================
 
 const TX_LABEL = {
   INCOME: 'Pemasukan',
@@ -25,24 +29,34 @@ const TX_BG = {
   TRANSFER: 'bg-blue-50 border-blue-100',
 };
 
-/* =========================================================
-   HELPER
-========================================================= */
+
+// =========================================================
+// HELPER
+// =========================================================
 
 function formatNumber(value) {
-  if (value === null || value === undefined || value === '') {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
     return '';
   }
 
   const clean = String(value).replace(/\D/g, '');
 
-  if (!clean) return '';
+  if (!clean) {
+    return '';
+  }
 
   return Number(clean).toLocaleString('id-ID');
 }
 
+
 function parseNumber(value) {
-  if (!value) return 0;
+  if (!value) {
+    return 0;
+  }
 
   return Number(
     String(value)
@@ -52,8 +66,11 @@ function parseNumber(value) {
   );
 }
 
+
 function formatDate(date) {
-  if (!date) return '-';
+  if (!date) {
+    return '-';
+  }
 
   const d = new Date(date);
 
@@ -68,8 +85,11 @@ function formatDate(date) {
   });
 }
 
+
 function formatDateInput(date) {
-  if (!date) return '';
+  if (!date) {
+    return '';
+  }
 
   const d = new Date(date);
 
@@ -78,26 +98,45 @@ function formatDateInput(date) {
   }
 
   const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(
+    d.getMonth() + 1
+  ).padStart(2, '0');
+
+  const day = String(
+    d.getDate()
+  ).padStart(2, '0');
 
   return `${year}-${month}-${day}`;
 }
+
 
 function escapeCsv(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
-/* =========================================================
-   MAIN
-========================================================= */
+
+// =========================================================
+// MAIN COMPONENT
+// =========================================================
 
 export default function Transactions() {
+
+  // =======================================================
+  // DATA
+  // =======================================================
+
   const [tab, setTab] = useState(null);
 
   const [accounts, setAccounts] = useState([]);
+
   const [categories, setCategories] = useState([]);
+
   const [items, setItems] = useState([]);
+
+
+  // =======================================================
+  // FILTER
+  // =======================================================
 
   const [filter, setFilter] = useState({
     type: '',
@@ -108,83 +147,236 @@ export default function Transactions() {
     search: '',
   });
 
+
+  // =======================================================
+  // LOADING
+  // =======================================================
+
   const [loading, setLoading] = useState(true);
+
   const [refreshing, setRefreshing] = useState(false);
 
+
+  // =======================================================
+  // PROCESSING
+  // =======================================================
+
+  const [processing, setProcessing] = useState(false);
+
+  const [processingTitle, setProcessingTitle] =
+    useState('Memproses Data');
+
+  const [processingMessage, setProcessingMessage] =
+    useState('Mohon tunggu sebentar...');
+
+
+  // =======================================================
+  // PAGINATION
+  // =======================================================
+
   const [page, setPage] = useState(1);
+
   const [pageSize] = useState(10);
+
   const [total, setTotal] = useState(0);
 
-  /* =======================================================
-     LOAD DATA
-  ======================================================= */
+
+  // =======================================================
+  // CONFIRM MODAL
+  // =======================================================
+
+  const [showConfirm, setShowConfirm] =
+    useState(false);
+
+  const [pendingTransaction, setPendingTransaction] =
+    useState(null);
+
+
+  // =======================================================
+  // SUCCESS POPUP
+  // =======================================================
+
+  const [success, setSuccess] = useState({
+    show: false,
+    title: '',
+    message: '',
+  });
+
+
+  // =======================================================
+  // ERROR POPUP
+  // =======================================================
+
+  const [errorPopup, setErrorPopup] = useState({
+    show: false,
+    title: '',
+    message: '',
+  });
+
+
+  // =======================================================
+  // ERROR
+  // =======================================================
+
+  const [error, setError] = useState('');
+
+
+  // =======================================================
+  // SUCCESS TIMER
+  // =======================================================
+
+  const successTimerRef = useRef(null);
+
+
+  useEffect(() => {
+
+    return () => {
+
+      if (successTimerRef.current) {
+        clearTimeout(
+          successTimerRef.current
+        );
+      }
+
+    };
+
+  }, []);
+
+
+  // =======================================================
+  // LOAD DATA
+  // =======================================================
 
   const loadAll = async (isRefresh = false) => {
+
     try {
+
       if (isRefresh) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
 
+      setError('');
+
+
       const params = {
         page,
         pageSize,
       };
 
+
       if (filter.type) {
         params.type = filter.type;
       }
 
+
       if (filter.categoryId) {
-        params.categoryId = filter.categoryId;
+        params.categoryId =
+          filter.categoryId;
       }
+
 
       if (filter.accountId) {
-        params.accountId = filter.accountId;
+        params.accountId =
+          filter.accountId;
       }
+
 
       if (filter.startDate) {
-        params.startDate = filter.startDate;
+        params.startDate =
+          filter.startDate;
       }
+
 
       if (filter.endDate) {
-        params.endDate = filter.endDate;
+        params.endDate =
+          filter.endDate;
       }
 
-      const [acc, cat, tx] = await Promise.all([
+
+      const [
+        acc,
+        cat,
+        tx,
+      ] = await Promise.all([
+
         api.get('/accounts'),
+
         api.get('/categories'),
-        api.get('/transactions', {
-          params,
-        }),
+
+        api.get(
+          '/transactions',
+          {
+            params,
+          }
+        ),
+
       ]);
 
-      setAccounts(acc.data || []);
-      setCategories(cat.data || []);
 
-      setItems(tx.data?.items || []);
-      setTotal(tx.data?.total || 0);
-
-      if (tx.data?.page) {
-        setPage(tx.data.page);
-      }
-    } catch (error) {
-      console.error(
-        'Gagal memuat transaksi:',
-        error
+      setAccounts(
+        acc.data || []
       );
 
+      setCategories(
+        cat.data || []
+      );
+
+      setItems(
+        tx.data?.items || []
+      );
+
+      setTotal(
+        tx.data?.total || 0
+      );
+
+
+      if (tx.data?.page) {
+
+        setPage(
+          tx.data.page
+        );
+
+      }
+
+    } catch (err) {
+
+      console.error(
+        'Gagal memuat transaksi:',
+        err
+      );
+
+
       setItems([]);
+
       setTotal(0);
+
+
+      setError(
+        err.response?.data?.message ||
+        'Gagal memuat transaksi.'
+      );
+
     } finally {
+
       setLoading(false);
+
       setRefreshing(false);
+
     }
+
   };
 
+
+  // =======================================================
+  // INITIAL / FILTER LOAD
+  // =======================================================
+
   useEffect(() => {
+
     loadAll();
+
   }, [
     filter.type,
     filter.categoryId,
@@ -194,20 +386,113 @@ export default function Transactions() {
     page,
   ]);
 
-  /* =======================================================
-     FILTER HANDLER
-  ======================================================= */
 
-  const updateFilter = (key, value) => {
+  // =======================================================
+  // SUCCESS POPUP
+  // =======================================================
+
+  const showSuccess = (
+    title,
+    message
+  ) => {
+
+    if (successTimerRef.current) {
+
+      clearTimeout(
+        successTimerRef.current
+      );
+
+    }
+
+
+    setSuccess({
+      show: true,
+      title,
+      message,
+    });
+
+
+    successTimerRef.current =
+      setTimeout(() => {
+
+        setSuccess((prev) => ({
+          ...prev,
+          show: false,
+        }));
+
+      }, 3000);
+
+  };
+
+
+  const closeSuccess = () => {
+
+    if (successTimerRef.current) {
+
+      clearTimeout(
+        successTimerRef.current
+      );
+
+    }
+
+
+    setSuccess((prev) => ({
+      ...prev,
+      show: false,
+    }));
+
+  };
+
+
+  // =======================================================
+  // ERROR POPUP
+  // =======================================================
+
+  const showErrorPopup = (
+    title,
+    message
+  ) => {
+
+    setErrorPopup({
+      show: true,
+      title,
+      message,
+    });
+
+  };
+
+
+  const closeErrorPopup = () => {
+
+    setErrorPopup((prev) => ({
+      ...prev,
+      show: false,
+    }));
+
+  };
+
+
+  // =======================================================
+  // FILTER HANDLER
+  // =======================================================
+
+  const updateFilter = (
+    key,
+    value
+  ) => {
+
     setFilter((prev) => ({
       ...prev,
       [key]: value,
     }));
 
     setPage(1);
+
   };
 
+
   const resetFilter = () => {
+
     setFilter({
       type: '',
       categoryId: '',
@@ -218,29 +503,45 @@ export default function Transactions() {
     });
 
     setPage(1);
+
   };
 
-  /* =======================================================
-     QUICK DATE FILTER
-  ======================================================= */
 
-  const setQuickPeriod = (period) => {
+  // =======================================================
+  // QUICK DATE FILTER
+  // =======================================================
+
+  const setQuickPeriod = (
+    period
+  ) => {
+
     const today = new Date();
 
     let start = new Date(today);
+
     let end = new Date(today);
 
+
     if (period === 'today') {
-      // nothing
+
+      start = new Date(today);
+
+      end = new Date(today);
+
     }
 
+
     if (period === '7days') {
+
       start.setDate(
         today.getDate() - 6
       );
+
     }
 
+
     if (period === 'thisMonth') {
+
       start = new Date(
         today.getFullYear(),
         today.getMonth(),
@@ -252,9 +553,12 @@ export default function Transactions() {
         today.getMonth() + 1,
         0
       );
+
     }
 
+
     if (period === 'lastMonth') {
+
       start = new Date(
         today.getFullYear(),
         today.getMonth() - 1,
@@ -266,122 +570,188 @@ export default function Transactions() {
         today.getMonth(),
         0
       );
+
     }
+
 
     setFilter((prev) => ({
       ...prev,
-      startDate: formatDateInput(start),
-      endDate: formatDateInput(end),
+      startDate:
+        formatDateInput(start),
+      endDate:
+        formatDateInput(end),
     }));
 
     setPage(1);
+
   };
 
-  /* =======================================================
-     FILTER OPTIONS
-     
-     Hanya tampilkan kategori/rekening yang muncul
-     pada data transaksi yang sedang ditampilkan.
-  ======================================================= */
 
-  const availableCategories = useMemo(() => {
-    const map = new Map();
+  // =======================================================
+  // AVAILABLE FILTER DATA
+  // =======================================================
 
-    items.forEach((item) => {
-      if (
-        item.category?.id &&
-        item.category?.name
-      ) {
-        map.set(
-          item.category.id,
-          item.category
-        );
-      }
-    });
+  const availableCategories =
+    useMemo(() => {
 
-    return Array.from(map.values()).sort(
-      (a, b) =>
-        a.name.localeCompare(b.name)
-    );
-  }, [items]);
+      const map = new Map();
 
-  const availableAccounts = useMemo(() => {
-    const map = new Map();
 
-    items.forEach((item) => {
-      if (
-        item.account?.id &&
-        item.account?.name
-      ) {
-        map.set(
-          item.account.id,
-          item.account
-        );
-      }
-    });
+      items.forEach((item) => {
 
-    return Array.from(map.values()).sort(
-      (a, b) =>
-        a.name.localeCompare(b.name)
-    );
-  }, [items]);
+        if (
+          item.category?.id &&
+          item.category?.name
+        ) {
 
-  /* =======================================================
-     CLIENT SEARCH
-  ======================================================= */
+          map.set(
+            item.category.id,
+            item.category
+          );
 
-  const displayedItems = useMemo(() => {
-    if (!filter.search.trim()) {
-      return items;
-    }
+        }
 
-    const keyword =
-      filter.search
-        .toLowerCase()
-        .trim();
+      });
 
-    return items.filter((item) => {
-      const values = [
-        item.note,
-        item.description,
-        item.category?.name,
-        item.account?.name,
-        TX_LABEL[item.type],
-      ];
 
-      return values.some((value) =>
-        String(value || '')
-          .toLowerCase()
-          .includes(keyword)
+      return Array.from(
+        map.values()
+      ).sort((a, b) =>
+        a.name.localeCompare(
+          b.name
+        )
       );
-    });
-  }, [items, filter.search]);
 
-  /* =======================================================
-     SUMMARY
-  ======================================================= */
+    }, [items]);
+
+
+  const availableAccounts =
+    useMemo(() => {
+
+      const map = new Map();
+
+
+      items.forEach((item) => {
+
+        if (
+          item.account?.id &&
+          item.account?.name
+        ) {
+
+          map.set(
+            item.account.id,
+            item.account
+          );
+
+        }
+
+      });
+
+
+      return Array.from(
+        map.values()
+      ).sort((a, b) =>
+        a.name.localeCompare(
+          b.name
+        )
+      );
+
+    }, [items]);
+
+
+  // =======================================================
+  // CLIENT SEARCH
+  // =======================================================
+
+  const displayedItems =
+    useMemo(() => {
+
+      if (!filter.search.trim()) {
+        return items;
+      }
+
+
+      const keyword =
+        filter.search
+          .toLowerCase()
+          .trim();
+
+
+      return items.filter(
+        (item) => {
+
+          const values = [
+
+            item.note,
+
+            item.description,
+
+            item.category?.name,
+
+            item.account?.name,
+
+            TX_LABEL[item.type],
+
+          ];
+
+
+          return values.some(
+            (value) =>
+              String(value || '')
+                .toLowerCase()
+                .includes(keyword)
+          );
+
+        }
+      );
+
+    }, [
+      items,
+      filter.search,
+    ]);
+
+
+  // =======================================================
+  // SUMMARY
+  // =======================================================
 
   const summary = useMemo(() => {
+
     let income = 0;
+
     let expense = 0;
+
     let transfer = 0;
 
+
     items.forEach((item) => {
+
       const amount =
         Number(item.amount) || 0;
 
+
       if (item.type === 'INCOME') {
+
         income += amount;
+
       }
+
 
       if (item.type === 'EXPENSE') {
+
         expense += amount;
+
       }
 
+
       if (item.type === 'TRANSFER') {
+
         transfer += amount;
+
       }
+
     });
+
 
     return {
       income,
@@ -389,122 +759,182 @@ export default function Transactions() {
       transfer,
       net: income - expense,
     };
+
   }, [items]);
 
-  /* =======================================================
-     ACTIVE FILTER
-  ======================================================= */
+
+  // =======================================================
+  // ACTIVE FILTER
+  // =======================================================
 
   const activeFilters = [];
 
+
   if (filter.startDate) {
+
     activeFilters.push({
       key: 'startDate',
-      label: `Mulai ${formatDate(
-        filter.startDate
-      )}`,
+      label:
+        `Mulai ${formatDate(
+          filter.startDate
+        )}`,
     });
+
   }
+
 
   if (filter.endDate) {
+
     activeFilters.push({
       key: 'endDate',
-      label: `Sampai ${formatDate(
-        filter.endDate
-      )}`,
+      label:
+        `Sampai ${formatDate(
+          filter.endDate
+        )}`,
     });
+
   }
+
 
   if (filter.type) {
+
     activeFilters.push({
       key: 'type',
-      label: TX_LABEL[filter.type],
+      label:
+        TX_LABEL[filter.type],
     });
+
   }
 
+
   if (filter.categoryId) {
+
     const category =
       categories.find(
         (c) =>
-          c.id ===
-          filter.categoryId
+          String(c.id) ===
+          String(
+            filter.categoryId
+          )
       );
 
+
     if (category) {
+
       activeFilters.push({
         key: 'categoryId',
         label: category.name,
       });
+
     }
+
   }
 
+
   if (filter.accountId) {
+
     const account =
       accounts.find(
         (a) =>
-          a.id ===
-          filter.accountId
+          String(a.id) ===
+          String(
+            filter.accountId
+          )
       );
 
+
     if (account) {
+
       activeFilters.push({
         key: 'accountId',
         label: account.name,
       });
+
     }
+
   }
 
-  /* =======================================================
-     EXPORT CSV
-  ======================================================= */
+
+  // =======================================================
+  // EXPORT CSV
+  // =======================================================
 
   const exportCSV = async () => {
+
     try {
+
       const params = {
         page: 1,
-        pageSize: total || 1000,
+        pageSize:
+          total || 1000,
       };
 
+
       if (filter.type) {
-        params.type = filter.type;
+
+        params.type =
+          filter.type;
+
       }
+
 
       if (filter.categoryId) {
+
         params.categoryId =
           filter.categoryId;
+
       }
+
 
       if (filter.accountId) {
+
         params.accountId =
           filter.accountId;
+
       }
+
 
       if (filter.startDate) {
+
         params.startDate =
           filter.startDate;
+
       }
 
+
       if (filter.endDate) {
+
         params.endDate =
           filter.endDate;
+
       }
+
 
       const response =
         await api.get(
           '/transactions',
-          { params }
+          {
+            params,
+          }
         );
 
+
       const exportItems =
-        response.data?.items || [];
+        response.data?.items ||
+        [];
+
 
       if (!exportItems.length) {
-        alert(
-          'Tidak ada transaksi yang dapat diekspor.'
+
+        showErrorPopup(
+          'Tidak Ada Data',
+          'Tidak ada transaksi yang dapat diekspor berdasarkan filter yang dipilih.'
         );
 
         return;
+
       }
+
 
       const headers = [
         'Tanggal',
@@ -515,20 +945,34 @@ export default function Transactions() {
         'Nominal',
       ];
 
+
       const rows =
-        exportItems.map((item) => [
-          formatDate(item.date),
-          TX_LABEL[item.type] ||
-            item.type,
-          item.category?.name ||
-            '-',
-          item.account?.name ||
-            '-',
-          item.note ||
-            item.description ||
-            '-',
-          Number(item.amount) || 0,
-        ]);
+        exportItems.map(
+          (item) => [
+
+            formatDate(
+              item.date
+            ),
+
+            TX_LABEL[item.type] ||
+              item.type,
+
+            item.category?.name ||
+              '-',
+
+            item.account?.name ||
+              '-',
+
+            item.note ||
+              item.description ||
+              '-',
+
+            Number(item.amount) ||
+              0,
+
+          ]
+        );
+
 
       const csv = [
         headers,
@@ -541,103 +985,295 @@ export default function Transactions() {
         )
         .join('\n');
 
-      const blob = new Blob(
-        ['\uFEFF' + csv],
-        {
-          type:
-            'text/csv;charset=utf-8;',
-        }
-      );
+
+      const blob =
+        new Blob(
+          ['\uFEFF' + csv],
+          {
+            type:
+              'text/csv;charset=utf-8;',
+          }
+        );
+
 
       const url =
-        URL.createObjectURL(blob);
+        URL.createObjectURL(
+          blob
+        );
+
 
       const link =
-        document.createElement('a');
+        document.createElement(
+          'a'
+        );
+
 
       link.href = url;
+
 
       link.download =
         `famfin-transaksi-${new Date()
           .toISOString()
           .slice(0, 10)}.csv`;
 
+
       document.body.appendChild(
         link
       );
 
+
       link.click();
+
 
       document.body.removeChild(
         link
       );
 
-      URL.revokeObjectURL(url);
-    } catch (error) {
+
+      URL.revokeObjectURL(
+        url
+      );
+
+    } catch (err) {
+
       console.error(
         'Export error:',
-        error
+        err
       );
 
-      alert(
-        'Gagal melakukan export CSV.'
+
+      showErrorPopup(
+        'Export Gagal',
+        err.response?.data?.message ||
+          'Gagal melakukan export CSV. Silakan coba lagi.'
       );
+
     }
+
   };
 
-  /* =======================================================
-     RENDER
-  ======================================================= */
+
+  // =======================================================
+  // OPEN TRANSACTION
+  // =======================================================
+
+  const openTransaction = (
+    type
+  ) => {
+
+    if (processing) {
+      return;
+    }
+
+
+    setError('');
+
+    setShowConfirm(false);
+
+    setPendingTransaction(null);
+
+    setTab(type);
+
+  };
+
+
+  // =======================================================
+  // TRANSACTION SAVED
+  // =======================================================
+
+  const handleTransactionSaved = (
+    transactionType
+  ) => {
+
+    const transactionLabel = {
+
+      income:
+        'Pemasukan',
+
+      expense:
+        'Pengeluaran',
+
+      transfer:
+        'Transfer',
+
+    };
+
+
+    setShowConfirm(false);
+
+    setPendingTransaction(null);
+
+    setTab(null);
+
+
+    showSuccess(
+      'Transaksi Berhasil Disimpan',
+      `${transactionLabel[transactionType]} berhasil disimpan.`
+    );
+
+
+    loadAll(true);
+
+  };
+
+
+  // =======================================================
+  // RENDER
+  // =======================================================
 
   return (
     <div className="space-y-6">
 
       {/* =================================================
-          PAGE HEADER
+          PROCESSING OVERLAY
       ================================================= */}
 
-      <section className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
+      <LoadingOverlay
+        loading={processing}
+        title={processingTitle}
+        message={processingMessage}
+      />
 
-        <div className="p-6 lg:p-7">
 
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+      {/* =================================================
+          SUCCESS POPUP
+      ================================================= */}
+
+      {success.show && (
+
+        <SuccessPopup
+          title={success.title}
+          message={success.message}
+          onClose={closeSuccess}
+        />
+
+      )}
+
+
+      {/* =================================================
+          ERROR POPUP
+      ================================================= */}
+
+      {errorPopup.show && (
+
+        <ErrorPopup
+          title={errorPopup.title}
+          message={errorPopup.message}
+          onClose={closeErrorPopup}
+        />
+
+      )}
+
+
+      {/* =================================================
+          HEADER
+      ================================================= */}
+
+      <section className="
+        overflow-hidden
+        rounded-[1.75rem]
+        border
+        border-slate-200
+        bg-white
+        shadow-sm
+      ">
+
+        <div className="relative p-6 lg:p-7">
+
+          <div className="
+            absolute
+            right-0
+            top-0
+            h-40
+            w-40
+            rounded-full
+            bg-blue-50/70
+            blur-3xl
+          " />
+
+
+          <div className="
+            relative
+            flex
+            flex-col
+            gap-6
+            lg:flex-row
+            lg:items-center
+            lg:justify-between
+          ">
 
             <div>
 
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              <h1 className="
+                text-2xl
+                font-bold
+                tracking-tight
+                text-slate-900
+              ">
                 Transaksi
               </h1>
 
-              <p className="mt-1 max-w-xl text-sm leading-6 text-slate-500">
-                Catat pemasukan, pengeluaran,
-                dan transfer dengan mudah.
+
+              <p className="
+                mt-1
+                max-w-xl
+                text-sm
+                leading-6
+                text-slate-500
+              ">
+                Catat pemasukan,
+                pengeluaran,
+                dan transfer
+                dengan mudah.
               </p>
 
             </div>
 
-            <div className="flex flex-wrap gap-2.5">
+
+            <div className="
+              flex
+              flex-wrap
+              gap-2.5
+            ">
 
               <QuickBtn
                 label="+ Pemasukan"
-                color="bg-emerald-600 hover:bg-emerald-700"
+                color="
+                  bg-emerald-600
+                  hover:bg-emerald-700
+                "
                 onClick={() =>
-                  setTab('income')
+                  openTransaction(
+                    'income'
+                  )
                 }
               />
+
 
               <QuickBtn
                 label="+ Pengeluaran"
-                color="bg-red-600 hover:bg-red-700"
+                color="
+                  bg-rose-600
+                  hover:bg-rose-700
+                "
                 onClick={() =>
-                  setTab('expense')
+                  openTransaction(
+                    'expense'
+                  )
                 }
               />
 
+
               <QuickBtn
                 label="↔ Transfer"
-                color="bg-blue-600 hover:bg-blue-700"
+                color="
+                  bg-blue-600
+                  hover:bg-blue-700
+                "
                 onClick={() =>
-                  setTab('transfer')
+                  openTransaction(
+                    'transfer'
+                  )
                 }
               />
 
@@ -649,30 +1285,81 @@ export default function Transactions() {
 
       </section>
 
+
       {/* =================================================
           TRANSACTION FORM
       ================================================= */}
 
       {tab && (
+
         <TransactionForm
           type={tab}
           accounts={accounts}
           categories={categories}
-          onClose={() =>
-            setTab(null)
+          processing={processing}
+          setProcessing={
+            setProcessing
           }
-          onSaved={() => {
-            setTab(null);
-            loadAll(true);
+          setProcessingTitle={
+            setProcessingTitle
+          }
+          setProcessingMessage={
+            setProcessingMessage
+          }
+          showErrorPopup={
+            showErrorPopup
+          }
+
+          onClose={() => {
+
+            if (!processing) {
+
+              setTab(null);
+
+              setShowConfirm(false);
+
+              setPendingTransaction(
+                null
+              );
+
+            }
+
           }}
+
+          onSaved={() =>
+            handleTransactionSaved(
+              tab
+            )
+          }
+
+          onConfirmReady={(
+            payload
+          ) => {
+
+            setPendingTransaction(
+              payload
+            );
+
+            setShowConfirm(true);
+
+          }}
+
         />
+
       )}
+
 
       {/* =================================================
           SUMMARY
       ================================================= */}
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="
+        grid
+        grid-cols-1
+        gap-4
+        sm:grid-cols-2
+        xl:grid-cols-4
+      ">
 
         <SummaryCard
           label="Pemasukan"
@@ -680,11 +1367,13 @@ export default function Transactions() {
           color="emerald"
         />
 
+
         <SummaryCard
           label="Pengeluaran"
           value={summary.expense}
           color="red"
         />
+
 
         <SummaryCard
           label="Cash Flow"
@@ -696,6 +1385,7 @@ export default function Transactions() {
           }
         />
 
+
         <SummaryCard
           label="Transfer"
           value={summary.transfer}
@@ -704,37 +1394,68 @@ export default function Transactions() {
 
       </section>
 
+
       {/* =================================================
           HISTORY
       ================================================= */}
 
-      <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <section className="
+        rounded-[1.75rem]
+        border
+        border-slate-200
+        bg-white
+        p-5
+        shadow-sm
+        sm:p-6
+      ">
 
-        {/* HEADER */}
-
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="
+          flex
+          flex-col
+          gap-4
+          xl:flex-row
+          xl:items-center
+          xl:justify-between
+        ">
 
           <div>
 
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="
+              text-lg
+              font-semibold
+              text-slate-900
+            ">
               Riwayat Transaksi
             </h2>
 
-            <p className="mt-1 text-sm text-slate-500">
+
+            <p className="
+              mt-1
+              text-sm
+              text-slate-500
+            ">
               Cari, filter, dan kelola
               aktivitas keuangan keluarga.
             </p>
 
           </div>
 
-          <div className="flex flex-wrap gap-2">
+
+          <div className="
+            flex
+            flex-wrap
+            gap-2
+          ">
 
             <button
               type="button"
               onClick={() =>
                 loadAll(true)
               }
-              disabled={refreshing}
+              disabled={
+                refreshing ||
+                processing
+              }
               className="
                 inline-flex
                 items-center
@@ -750,6 +1471,7 @@ export default function Transactions() {
                 text-blue-600
                 transition
                 hover:bg-blue-100
+                disabled:cursor-not-allowed
                 disabled:opacity-50
               "
             >
@@ -758,9 +1480,13 @@ export default function Transactions() {
                 : 'Refresh'}
             </button>
 
+
             <button
               type="button"
               onClick={exportCSV}
+              disabled={
+                processing
+              }
               className="
                 inline-flex
                 items-center
@@ -776,6 +1502,8 @@ export default function Transactions() {
                 text-slate-700
                 transition
                 hover:bg-slate-50
+                disabled:cursor-not-allowed
+                disabled:opacity-50
               "
             >
               Export CSV
@@ -785,32 +1513,58 @@ export default function Transactions() {
 
         </div>
 
+
         {/* =================================================
-            FILTER PANEL
+            FILTER
         ================================================= */}
 
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="
+          mt-6
+          rounded-2xl
+          border
+          border-slate-200
+          bg-slate-50/70
+          p-4
+        ">
 
-          <div className="mb-4 flex items-center justify-between">
+          <div className="
+            mb-4
+            flex
+            items-center
+            justify-between
+          ">
 
             <div>
 
-              <p className="text-sm font-semibold text-slate-800">
+              <p className="
+                text-sm
+                font-semibold
+                text-slate-800
+              ">
                 Filter transaksi
               </p>
 
-              <p className="text-xs text-slate-500">
-                Persempit data sesuai kebutuhan.
+
+              <p className="
+                text-xs
+                text-slate-500
+              ">
+                Persempit data sesuai
+                kebutuhan.
               </p>
 
             </div>
+
 
             <button
               type="button"
               onClick={resetFilter}
               disabled={
-                activeFilters.length === 0 &&
-                !filter.search
+                (
+                  activeFilters.length === 0 &&
+                  !filter.search
+                ) ||
+                processing
               }
               className="
                 text-xs
@@ -827,26 +1581,43 @@ export default function Transactions() {
 
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
 
-            {/* SEARCH */}
+          <div className="
+            grid
+            grid-cols-1
+            gap-3
+            md:grid-cols-2
+            xl:grid-cols-5
+          ">
 
             <div className="xl:col-span-2">
 
-              <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+              <label className="
+                mb-1.5
+                block
+                text-xs
+                font-semibold
+                text-slate-500
+              ">
                 Cari transaksi
               </label>
 
+
               <input
                 type="text"
-                placeholder="Cari catatan, kategori, rekening..."
+                disabled={processing}
+                placeholder="
+                  Cari catatan, kategori, rekening...
+                "
                 value={filter.search}
                 onChange={(e) =>
-                  setFilter((prev) => ({
-                    ...prev,
-                    search:
-                      e.target.value,
-                  }))
+                  setFilter(
+                    (prev) => ({
+                      ...prev,
+                      search:
+                        e.target.value,
+                    })
+                  )
                 }
                 className="
                   h-10
@@ -864,12 +1635,13 @@ export default function Transactions() {
                   focus:border-blue-400
                   focus:ring-2
                   focus:ring-blue-100
+                  disabled:cursor-not-allowed
+                  disabled:bg-slate-50
                 "
               />
 
             </div>
 
-            {/* JENIS */}
 
             <FilterSelect
               label="Jenis"
@@ -880,7 +1652,9 @@ export default function Transactions() {
                   value
                 )
               }
+              disabled={processing}
             >
+
               <option value="">
                 Semua Jenis
               </option>
@@ -899,59 +1673,71 @@ export default function Transactions() {
 
             </FilterSelect>
 
-            {/* KATEGORI */}
 
             <FilterSelect
               label="Kategori"
-              value={filter.categoryId}
+              value={
+                filter.categoryId
+              }
               onChange={(value) =>
                 updateFilter(
                   'categoryId',
                   value
                 )
               }
+              disabled={processing}
             >
+
               <option value="">
                 Semua Kategori
               </option>
 
+
               {availableCategories.map(
                 (category) => (
+
                   <option
                     key={category.id}
                     value={category.id}
                   >
                     {category.name}
                   </option>
+
                 )
               )}
 
             </FilterSelect>
 
-            {/* ACCOUNT */}
 
             <FilterSelect
               label="Rekening"
-              value={filter.accountId}
+              value={
+                filter.accountId
+              }
               onChange={(value) =>
                 updateFilter(
                   'accountId',
                   value
                 )
               }
+              disabled={processing}
             >
+
               <option value="">
                 Semua Rekening
               </option>
 
+
               {availableAccounts.map(
                 (account) => (
+
                   <option
                     key={account.id}
                     value={account.id}
                   >
                     {account.name}
                   </option>
+
                 )
               )}
 
@@ -959,17 +1745,37 @@ export default function Transactions() {
 
           </div>
 
-          {/* DATE */}
+
+          {/* =================================================
+              DATE FILTER
+          ================================================= */}
 
           <div className="mt-4">
 
-            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="
+              mb-2
+              flex
+              flex-col
+              gap-2
+              sm:flex-row
+              sm:items-center
+              sm:justify-between
+            ">
 
-              <label className="text-xs font-semibold text-slate-500">
+              <label className="
+                text-xs
+                font-semibold
+                text-slate-500
+              ">
                 Periode tanggal
               </label>
 
-              <div className="flex flex-wrap gap-1.5">
+
+              <div className="
+                flex
+                flex-wrap
+                gap-1.5
+              ">
 
                 <QuickPeriodBtn
                   label="Hari ini"
@@ -978,7 +1784,9 @@ export default function Transactions() {
                       'today'
                     )
                   }
+                  disabled={processing}
                 />
+
 
                 <QuickPeriodBtn
                   label="7 hari"
@@ -987,7 +1795,9 @@ export default function Transactions() {
                       '7days'
                     )
                   }
+                  disabled={processing}
                 />
+
 
                 <QuickPeriodBtn
                   label="Bulan ini"
@@ -996,7 +1806,9 @@ export default function Transactions() {
                       'thisMonth'
                     )
                   }
+                  disabled={processing}
                 />
+
 
                 <QuickPeriodBtn
                   label="Bulan lalu"
@@ -1005,13 +1817,20 @@ export default function Transactions() {
                       'lastMonth'
                     )
                   }
+                  disabled={processing}
                 />
 
               </div>
 
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+            <div className="
+              grid
+              grid-cols-1
+              gap-3
+              sm:grid-cols-2
+            ">
 
               <DateInput
                 label="Tanggal mulai"
@@ -1024,7 +1843,9 @@ export default function Transactions() {
                     value
                   )
                 }
+                disabled={processing}
               />
+
 
               <DateInput
                 label="Tanggal akhir"
@@ -1041,23 +1862,39 @@ export default function Transactions() {
                     value
                   )
                 }
+                disabled={processing}
               />
 
             </div>
 
           </div>
 
-          {/* ACTIVE CHIPS */}
+
+          {/* =================================================
+              ACTIVE FILTER
+          ================================================= */}
 
           {activeFilters.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
 
-              <span className="text-xs text-slate-400">
+            <div className="
+              mt-4
+              flex
+              flex-wrap
+              items-center
+              gap-2
+            ">
+
+              <span className="
+                text-xs
+                text-slate-400
+              ">
                 Filter aktif:
               </span>
 
+
               {activeFilters.map(
                 (item) => (
+
                   <span
                     key={item.key}
                     className="
@@ -1075,89 +1912,182 @@ export default function Transactions() {
                       text-blue-600
                     "
                   >
+
                     {item.label}
+
 
                     <button
                       type="button"
+                      disabled={
+                        processing
+                      }
                       onClick={() =>
                         updateFilter(
                           item.key,
                           ''
                         )
                       }
-                      className="text-blue-400 hover:text-blue-700"
+                      className="
+                        text-blue-400
+                        hover:text-blue-700
+                        disabled:opacity-40
+                      "
                     >
                       ×
                     </button>
 
                   </span>
+
                 )
               )}
 
             </div>
+
           )}
 
         </div>
 
-        {/* RESULT INFO */}
 
-        <div className="mt-5 flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
+        {/* =================================================
+            RESULT INFO
+        ================================================= */}
 
-          <p className="text-xs text-slate-500">
+        <div className="
+          mt-5
+          flex
+          flex-col
+          gap-2
+          border-b
+          border-slate-100
+          pb-4
+          sm:flex-row
+          sm:items-center
+          sm:justify-between
+        ">
+
+          <p className="
+            text-xs
+            text-slate-500
+          ">
+
             Menampilkan{' '}
-            <span className="font-semibold text-slate-700">
+
+            <span className="
+              font-semibold
+              text-slate-700
+            ">
               {displayedItems.length}
             </span>{' '}
+
             transaksi dari{' '}
-            <span className="font-semibold text-slate-700">
+
+            <span className="
+              font-semibold
+              text-slate-700
+            ">
               {total}
             </span>{' '}
+
             data
+
           </p>
+
 
           {(filter.startDate ||
             filter.endDate) && (
-            <p className="text-xs text-slate-400">
+
+            <p className="
+              text-xs
+              text-slate-400
+            ">
+
               {filter.startDate
                 ? formatDate(
                     filter.startDate
                   )
                 : 'Awal'}
+
               {' — '}
+
               {filter.endDate
                 ? formatDate(
                     filter.endDate
                   )
                 : 'Sekarang'}
+
             </p>
+
           )}
 
         </div>
+
+
+        {/* =================================================
+            ERROR INLINE
+        ================================================= */}
+
+        {error && !loading && (
+
+          <div className="
+            mt-4
+            rounded-xl
+            border
+            border-red-100
+            bg-red-50
+            px-4
+            py-3
+            text-sm
+            text-red-600
+          ">
+            {error}
+          </div>
+
+        )}
+
 
         {/* =================================================
             TABLE
         ================================================= */}
 
-        <div className="mt-3 overflow-x-auto">
+        <div className="
+          mt-3
+          overflow-x-auto
+        ">
 
           {loading ? (
+
             <TransactionSkeleton />
-          ) : displayedItems.length ===
-            0 ? (
+
+          ) : displayedItems.length === 0 ? (
+
             <EmptyState
               hasFilter={
-                activeFilters.length >
-                  0 ||
-                filter.search
+                activeFilters.length > 0 ||
+                !!filter.search
               }
               onReset={resetFilter}
             />
+
           ) : (
-            <table className="w-full min-w-[850px] text-sm">
+
+            <table className="
+              w-full
+              min-w-[850px]
+              text-sm
+            ">
 
               <thead>
 
-                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <tr className="
+                  border-b
+                  border-slate-100
+                  text-left
+                  text-xs
+                  font-semibold
+                  uppercase
+                  tracking-wide
+                  text-slate-400
+                ">
 
                   <th className="px-4 py-4">
                     Tanggal
@@ -1179,7 +2109,11 @@ export default function Transactions() {
                     Catatan
                   </th>
 
-                  <th className="px-4 py-4 text-right">
+                  <th className="
+                    px-4
+                    py-4
+                    text-right
+                  ">
                     Nominal
                   </th>
 
@@ -1187,560 +2121,655 @@ export default function Transactions() {
 
               </thead>
 
-              <tbody className="divide-y divide-slate-100">
+
+              <tbody className="
+                divide-y
+                divide-slate-100
+              ">
 
                 {displayedItems.map(
                   (item) => (
+
                     <TransactionRow
                       key={item.id}
                       item={item}
                     />
+
                   )
                 )}
 
               </tbody>
 
             </table>
+
           )}
 
         </div>
 
-        {/* PAGINATION */}
+
+        {/* =================================================
+            PAGINATION
+        ================================================= */}
 
         {!loading &&
           displayedItems.length > 0 && (
+
             <Pagination
               page={page}
               pageSize={pageSize}
               total={total}
-              onPageChange={setPage}
+              onPageChange={
+                setPage
+              }
               className="mt-5"
             />
+
           )}
 
       </section>
 
-    </div>
-  );
-}
 
-/* =========================================================
-   TRANSACTION ROW
-========================================================= */
+      {/* =================================================
+          CONFIRM MODAL
+      ================================================= */}
 
-function TransactionRow({ item }) {
-  const amount =
-    Number(item.amount) || 0;
+      <ConfirmModal
 
-  let amountPrefix = '';
+        open={showConfirm}
 
-  if (item.type === 'INCOME') {
-    amountPrefix = '+ ';
-  }
+        title={
+          pendingTransaction?.title ||
+          'Simpan Transaksi?'
+        }
 
-  if (item.type === 'EXPENSE') {
-    amountPrefix = '- ';
-  }
+        message={
+          pendingTransaction?.message ||
+          'Apakah Anda yakin ingin menyimpan transaksi ini?'
+        }
 
-  return (
-    <tr className="group transition hover:bg-slate-50/80">
+        confirmText={
+          pendingTransaction?.confirmText ||
+          'Ya, Simpan'
+        }
 
-      <td className="px-4 py-4">
+        cancelText="Batal"
 
-        <div className="font-medium text-slate-700">
-          {formatDate(item.date)}
-        </div>
+        type={
+          pendingTransaction?.label ===
+          'Saldo Tidak Mencukupi'
+            ? 'warning'
+            : 'primary'
+        }
 
-      </td>
+        onConfirm={async () => {
 
-      <td className="px-4 py-4">
+          const transaction =
+            pendingTransaction;
 
-        <span
-          className={`
-            inline-flex
-            rounded-full
-            border
-            px-3
-            py-1
-            text-xs
-            font-semibold
-            ${TX_COLOR[item.type]}
-            ${TX_BG[item.type]}
-          `}
-        >
-          {TX_LABEL[item.type] ||
-            item.type}
-        </span>
 
-      </td>
+          if (
+            !transaction?.submit
+          ) {
 
-      <td className="px-4 py-4 text-slate-700">
-        {item.category?.name ||
-          '-'}
-      </td>
+            setShowConfirm(false);
 
-      <td className="px-4 py-4 text-slate-700">
-        {item.account?.name ||
-          '-'}
-      </td>
+            setPendingTransaction(
+              null
+            );
 
-      <td className="max-w-[260px] px-4 py-4 text-slate-500">
+            return;
 
-        <span
-          className="block truncate"
-          title={
-            item.note ||
-            item.description ||
-            '-'
           }
-        >
-          {item.note ||
-            item.description ||
-            '-'}
-        </span>
 
-      </td>
 
-      <td
-        className={`
-          px-4
-          py-4
-          text-right
-          font-semibold
-          ${TX_COLOR[item.type]}
-        `}
-      >
-        {amountPrefix}
-        {formatRupiah(amount)}
-      </td>
+          // Tutup modal terlebih dahulu
 
-    </tr>
-  );
-}
+          setShowConfirm(false);
 
-/* =========================================================
-   SUMMARY CARD
-========================================================= */
+          setPendingTransaction(
+            null
+          );
 
-function SummaryCard({
-  label,
-  value,
-  color,
-}) {
-  const colors = {
-    emerald:
-      'border-emerald-100 bg-emerald-50/70 text-emerald-600',
 
-    red:
-      'border-red-100 bg-red-50/70 text-red-600',
+          // Jalankan request
 
-    blue:
-      'border-blue-100 bg-blue-50/70 text-blue-600',
+          await transaction.submit();
 
-    slate:
-      'border-slate-200 bg-slate-50 text-slate-600',
-  };
+        }}
 
-  return (
-    <div
-      className={`
-        rounded-[1.5rem]
-        border
-        p-5
-        ${colors[color]}
-      `}
-    >
+        onCancel={() => {
 
-      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
-        {label}
-      </p>
+          if (processing) {
+            return;
+          }
 
-      <p className="mt-2 text-xl font-bold">
-        {formatRupiah(value)}
-      </p>
 
-    </div>
-  );
-}
+          setShowConfirm(false);
 
-/* =========================================================
-   QUICK BUTTON
-========================================================= */
+          setPendingTransaction(
+            null
+          );
 
-function QuickBtn({
-  label,
-  color,
-  onClick,
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`
-        rounded-xl
-        px-4
-        py-2.5
-        text-sm
-        font-semibold
-        text-white
-        shadow-sm
-        transition
-        hover:-translate-y-0.5
-        hover:shadow-md
-        ${color}
-      `}
-    >
-      {label}
-    </button>
-  );
-}
+        }}
 
-/* =========================================================
-   QUICK PERIOD
-========================================================= */
+        loading={processing}
 
-function QuickPeriodBtn({
-  label,
-  onClick,
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="
-        rounded-lg
-        border
-        border-slate-200
-        bg-white
-        px-2.5
-        py-1.5
-        text-[11px]
-        font-medium
-        text-slate-500
-        transition
-        hover:border-blue-200
-        hover:bg-blue-50
-        hover:text-blue-600
-      "
-    >
-      {label}
-    </button>
-  );
-}
-
-/* =========================================================
-   FILTER SELECT
-========================================================= */
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  children,
-}) {
-  return (
-    <div>
-
-      <label className="mb-1.5 block text-xs font-semibold text-slate-500">
-        {label}
-      </label>
-
-      <select
-        value={value}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
-        className="
-          h-10
-          w-full
-          rounded-xl
-          border
-          border-slate-200
-          bg-white
-          px-3
-          text-sm
-          text-slate-700
-          outline-none
-          transition
-          focus:border-blue-400
-          focus:ring-2
-          focus:ring-blue-100
-        "
-      >
-        {children}
-      </select>
-
-    </div>
-  );
-}
-
-/* =========================================================
-   DATE INPUT
-========================================================= */
-
-function DateInput({
-  label,
-  value,
-  min,
-  onChange,
-}) {
-  return (
-    <div>
-
-      <label className="mb-1.5 block text-xs font-medium text-slate-500">
-        {label}
-      </label>
-
-      <input
-        type="date"
-        value={value}
-        min={min}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
-        className="
-          h-10
-          w-full
-          rounded-xl
-          border
-          border-slate-200
-          bg-white
-          px-3
-          text-sm
-          text-slate-700
-          outline-none
-          transition
-          focus:border-blue-400
-          focus:ring-2
-          focus:ring-blue-100
-        "
       />
 
     </div>
   );
 }
 
-/* =========================================================
-   EMPTY STATE
-========================================================= */
 
-function EmptyState({
-  hasFilter,
-  onReset,
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 px-6 py-14 text-center">
-
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-xl text-slate-400">
-        Rp
-      </div>
-
-      <h3 className="mt-4 font-semibold text-slate-700">
-        {hasFilter
-          ? 'Transaksi tidak ditemukan'
-          : 'Belum ada transaksi'}
-      </h3>
-
-      <p className="mt-1 max-w-sm text-sm leading-6 text-slate-400">
-        {hasFilter
-          ? 'Coba ubah periode atau filter yang dipilih untuk menemukan transaksi lainnya.'
-          : 'Belum ada transaksi yang tercatat. Yuk mulai catat transaksi pertama.'}
-      </p>
-
-      {hasFilter && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="
-            mt-4
-            rounded-xl
-            bg-blue-600
-            px-4
-            py-2
-            text-sm
-            font-semibold
-            text-white
-            transition
-            hover:bg-blue-700
-          "
-        >
-          Reset Filter
-        </button>
-      )}
-
-    </div>
-  );
-}
-
-/* =========================================================
-   SKELETON
-========================================================= */
-
-function TransactionSkeleton() {
-  return (
-    <div className="space-y-3 py-3">
-
-      {[1, 2, 3, 4, 5].map(
-        (item) => (
-          <div
-            key={item}
-            className="flex animate-pulse items-center gap-4 rounded-xl border border-slate-100 p-4"
-          >
-
-            <div className="h-4 w-24 rounded bg-slate-100" />
-
-            <div className="h-6 w-24 rounded-full bg-slate-100" />
-
-            <div className="h-4 w-28 rounded bg-slate-100" />
-
-            <div className="h-4 w-32 rounded bg-slate-100" />
-
-            <div className="h-4 flex-1 rounded bg-slate-100" />
-
-            <div className="h-4 w-28 rounded bg-slate-100" />
-
-          </div>
-        )
-      )}
-
-    </div>
-  );
-}
-
-/* =========================================================
-   TRANSACTION FORM
-========================================================= */
+// =========================================================
+// TRANSACTION FORM
+// =========================================================
 
 function TransactionForm({
   type,
   accounts,
   categories,
+  processing,
+  setProcessing,
+  setProcessingTitle,
+  setProcessingMessage,
+  showErrorPopup,
   onClose,
   onSaved,
+  onConfirmReady,
 }) {
+
   const [form, setForm] = useState({
+
     accountId: '',
+
     toAccountId: '',
+
     categoryId: '',
+
     amount: '',
+
     date: new Date()
       .toISOString()
       .slice(0, 10),
+
     note: '',
+
   });
 
-  const [error, setError] =
+
+  const [formError, setFormError] =
     useState('');
 
-  const [saving, setSaving] =
-    useState(false);
 
   const catType =
     type === 'income'
       ? 'INCOME'
       : 'EXPENSE';
 
+
   const filteredCategories =
     categories.filter(
       (category) =>
-        category.type === catType
+        category.type ===
+          catType &&
+        category.isActive !== false
     );
 
+
   const title = {
-    income: 'Tambah Pemasukan',
-    expense: 'Tambah Pengeluaran',
-    transfer: 'Pindahkan Uang',
+
+    income:
+      'Tambah Pemasukan',
+
+    expense:
+      'Tambah Pengeluaran',
+
+    transfer:
+      'Pindahkan Uang',
+
   }[type];
+
 
   const description = {
+
     income:
       'Tambahkan uang yang masuk ke rekening keluarga.',
+
     expense:
       'Catat pengeluaran agar kondisi keuangan tetap terkontrol.',
+
     transfer:
       'Pindahkan dana dari satu rekening ke rekening lainnya.',
+
   }[type];
 
-  /* =======================================================
-     AMOUNT
-  ======================================================= */
+
+  // =======================================================
+  // AMOUNT
+  // =======================================================
 
   const handleAmountChange = (
     event
   ) => {
+
     const value =
       event.target.value;
+
 
     setForm((prev) => ({
       ...prev,
       amount:
         formatNumber(value),
     }));
+
   };
 
-  /* =======================================================
-     SUBMIT
-  ======================================================= */
 
-  const submit = async (
-    event,
-    confirmLowBalance = false
-  ) => {
-    event.preventDefault();
+  // =======================================================
+  // VALIDATE
+  // =======================================================
 
-    setError('');
+  const validate = () => {
+
+    setFormError('');
+
 
     const amount =
-      parseNumber(form.amount);
-
-    if (!amount || amount <= 0) {
-      setError(
-        'Nominal harus lebih dari 0.'
+      parseNumber(
+        form.amount
       );
 
-      return;
+
+    if (
+      !amount ||
+      amount <= 0
+    ) {
+
+      showErrorPopup(
+        'Nominal Tidak Valid',
+        'Nominal transaksi harus lebih dari 0.'
+      );
+
+      return false;
+
     }
+
+
+    if (!form.accountId) {
+
+      showErrorPopup(
+        'Rekening Belum Dipilih',
+        type === 'income'
+          ? 'Silakan pilih rekening tujuan untuk pemasukan.'
+          : 'Silakan pilih rekening sumber untuk transaksi ini.'
+      );
+
+      return false;
+
+    }
+
 
     if (
       type === 'transfer' &&
-      form.accountId ===
-        form.toAccountId
+      !form.toAccountId
     ) {
-      setError(
-        'Rekening sumber dan tujuan harus berbeda.'
+
+      showErrorPopup(
+        'Rekening Tujuan Belum Dipilih',
+        'Silakan pilih rekening tujuan untuk transfer.'
       );
 
+      return false;
+
+    }
+
+
+    if (
+      type === 'transfer' &&
+      String(
+        form.accountId
+      ) === String(
+        form.toAccountId
+      )
+    ) {
+
+      showErrorPopup(
+        'Rekening Tidak Valid',
+        'Rekening sumber dan rekening tujuan harus berbeda.'
+      );
+
+      return false;
+
+    }
+
+
+    if (
+      type !== 'transfer' &&
+      !form.categoryId
+    ) {
+
+      showErrorPopup(
+        'Kategori Belum Dipilih',
+        'Silakan pilih kategori transaksi terlebih dahulu.'
+      );
+
+      return false;
+
+    }
+
+
+    if (!form.date) {
+
+      showErrorPopup(
+        'Tanggal Belum Diisi',
+        'Tanggal transaksi wajib diisi.'
+      );
+
+      return false;
+
+    }
+
+
+    return true;
+
+  };
+
+
+  // =======================================================
+  // SUBMIT FORM
+  // =======================================================
+
+  const submit = (
+    event
+  ) => {
+
+    event.preventDefault();
+
+
+    if (processing) {
       return;
     }
 
-    setSaving(true);
+
+    if (!validate()) {
+      return;
+    }
+
+
+    const amount =
+      parseNumber(
+        form.amount
+      );
+
+
+    const sourceAccount =
+      accounts.find(
+        (account) =>
+          String(
+            account.id
+          ) === String(
+            form.accountId
+          )
+      );
+
+
+    const targetAccount =
+      accounts.find(
+        (account) =>
+          String(
+            account.id
+          ) === String(
+            form.toAccountId
+          )
+      );
+
+
+    const category =
+      categories.find(
+        (item) =>
+          String(
+            item.id
+          ) === String(
+            form.categoryId
+          )
+      );
+
+
+    const transactionLabel = {
+
+      income:
+        'Pemasukan',
+
+      expense:
+        'Pengeluaran',
+
+      transfer:
+        'Transfer',
+
+    };
+
+
+    let message = '';
+
+
+    if (
+      type === 'income'
+    ) {
+
+      message =
+        `Apakah Anda yakin ingin menambahkan pemasukan sebesar ${formatRupiah(amount)} ke rekening "${sourceAccount?.name || '-'}"?`;
+
+    }
+
+
+    if (
+      type === 'expense'
+    ) {
+
+      message =
+        `Apakah Anda yakin ingin mencatat pengeluaran sebesar ${formatRupiah(amount)} dari rekening "${sourceAccount?.name || '-'}" untuk kategori "${category?.name || '-'}"?`;
+
+    }
+
+
+    if (
+      type === 'transfer'
+    ) {
+
+      message =
+        `Apakah Anda yakin ingin memindahkan ${formatRupiah(amount)} dari rekening "${sourceAccount?.name || '-'}" ke rekening "${targetAccount?.name || '-'}"?`;
+
+    }
+
+
+    onConfirmReady({
+
+      title:
+        `Simpan ${transactionLabel[type]}?`,
+
+      label:
+        transactionLabel[type],
+
+      message,
+
+      confirmText:
+        'Ya, Simpan',
+
+      submit:
+        () =>
+          confirmSubmit(false),
+
+    });
+
+  };
+
+
+  // =======================================================
+  // CONFIRM SUBMIT
+  // =======================================================
+
+  const confirmSubmit = async (
+    confirmLowBalance = false
+  ) => {
+
+    if (processing) {
+      return;
+    }
+
+
+    const amount =
+      parseNumber(
+        form.amount
+      );
+
+
+    if (
+      !amount ||
+      amount <= 0
+    ) {
+
+      showErrorPopup(
+        'Nominal Tidak Valid',
+        'Nominal transaksi harus lebih dari 0.'
+      );
+
+      return;
+
+    }
+
+
+    setFormError('');
+
+    setProcessing(true);
+
+
+    const processingConfig = {
+
+      income: {
+
+        title:
+          'Memproses Data',
+
+        message:
+          'Sedang memproses perubahan data. Mohon tunggu sebentar...',
+
+      },
+
+      expense: {
+
+        title:
+          'Memproses Data',
+
+        message:
+          'Sedang memproses perubahan data. Mohon tunggu sebentar...',
+
+      },
+
+      transfer: {
+
+        title:
+          'Memproses Data',
+
+        message:
+          'Sedang memproses perubahan data. Mohon tunggu sebentar...',
+
+
+      },
+
+    };
+
+
+    setProcessingTitle(
+      processingConfig[type].title
+    );
+
+
+    setProcessingMessage(
+      processingConfig[type].message
+    );
+
 
     try {
-      if (type === 'income') {
+
+      // ===================================================
+      // INCOME
+      // ===================================================
+
+      if (
+        type === 'income'
+      ) {
+
         await api.post(
           '/transactions/income',
           {
-            ...form,
+
+            accountId:
+              form.accountId,
+
+            categoryId:
+              form.categoryId,
+
             amount,
+
+            date:
+              form.date,
+
+            note:
+              form.note,
+
           }
         );
+
       }
 
-      if (type === 'expense') {
+
+      // ===================================================
+      // EXPENSE
+      // ===================================================
+
+      if (
+        type === 'expense'
+      ) {
+
         await api.post(
           '/transactions/expense',
           {
-            ...form,
+
+            accountId:
+              form.accountId,
+
+            categoryId:
+              form.categoryId,
+
             amount,
+
+            date:
+              form.date,
+
+            note:
+              form.note,
+
             confirmLowBalance,
+
           }
         );
+
       }
 
-      if (type === 'transfer') {
+
+      // ===================================================
+      // TRANSFER
+      // ===================================================
+
+      if (
+        type === 'transfer'
+      ) {
+
         await api.post(
           '/transactions/transfer',
           {
+
             fromAccountId:
               form.accountId,
 
@@ -1749,72 +2778,197 @@ function TransactionForm({
 
             amount,
 
-            date: form.date,
+            date:
+              form.date,
 
-            note: form.note,
+            note:
+              form.note,
+
           }
         );
+
       }
+
+
+      // ===================================================
+      // SUCCESS
+      // ===================================================
 
       onSaved();
+
+
+      // ===================================================
+      // RESET FORM
+      // ===================================================
+
+      setForm({
+
+        accountId: '',
+
+        toAccountId: '',
+
+        categoryId: '',
+
+        amount: '',
+
+        date: new Date()
+          .toISOString()
+          .slice(0, 10),
+
+        note: '',
+
+      });
+
+
     } catch (err) {
+
+      console.error(
+        'Gagal menyimpan transaksi:',
+        err
+      );
+
+
+      // ===================================================
+      // LOW BALANCE WARNING
+      // ===================================================
+
       if (
+        type === 'expense' &&
         err.response?.data?.code ===
-        'LOW_BALANCE_WARNING'
+          'LOW_BALANCE_WARNING'
       ) {
-        const confirmed =
-          window.confirm(
-            'Saldo rekening tidak mencukupi. Tetap simpan transaksi ini?'
-          );
 
-        if (confirmed) {
-          setSaving(false);
+        /*
+         * Pastikan processing mati
+         * sebelum modal kedua dibuka.
+         */
 
-          return submit(
-            event,
-            true
-          );
-        }
-      } else {
-        setError(
-          err.response?.data?.message ||
-            'Gagal menyimpan transaksi.'
-        );
+        setProcessing(false);
+
+
+        /*
+         * Confirmation kedua.
+         */
+
+        onConfirmReady({
+
+          title:
+            'Saldo Tidak Mencukupi',
+
+          label:
+            'Saldo Tidak Mencukupi',
+
+          message:
+            err.response?.data?.message ||
+            'Saldo rekening tidak mencukupi. Apakah Anda tetap ingin menyimpan transaksi ini?',
+
+          confirmText:
+            'Tetap Simpan',
+
+          submit:
+            () =>
+              confirmSubmit(true),
+
+        });
+
+
+        return;
+
       }
+
+
+      // ===================================================
+      // GENERAL ERROR
+      // ===================================================
+
+      showErrorPopup(
+        'Transaksi Gagal',
+        err.response?.data?.message ||
+          'Gagal menyimpan transaksi. Silakan coba lagi.'
+      );
+
     } finally {
-      setSaving(false);
+
+      setProcessing(false);
+
     }
+
   };
 
+
+  // =======================================================
+  // RENDER
+  // =======================================================
+
   return (
-    <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+    <section className="
+      rounded-[1.75rem]
+      border
+      border-slate-200
+      bg-white
+      p-5
+      shadow-sm
+      sm:p-6
+    ">
 
-      {/* HEADER */}
+      {/* =================================================
+          HEADER
+      ================================================= */}
 
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="
+        mb-6
+        flex
+        items-start
+        justify-between
+        gap-4
+      ">
 
         <div>
 
-          <div className="mb-2 inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">
+          <div className="
+            mb-2
+            inline-flex
+            rounded-full
+            bg-blue-50
+            px-3
+            py-1
+            text-xs
+            font-semibold
+            text-blue-600
+          ">
+
             {type === 'income'
               ? 'Uang Masuk'
               : type === 'expense'
               ? 'Uang Keluar'
               : 'Transfer Dana'}
+
           </div>
 
-          <h2 className="text-xl font-bold text-slate-900">
+
+          <h2 className="
+            text-xl
+            font-bold
+            text-slate-900
+          ">
             {title}
           </h2>
 
-          <p className="mt-1 text-sm text-slate-500">
+
+          <p className="
+            mt-1
+            text-sm
+            text-slate-500
+          ">
             {description}
           </p>
 
         </div>
 
+
         <button
           type="button"
+          disabled={processing}
           onClick={onClose}
           className="
             flex
@@ -1824,10 +2978,13 @@ function TransactionForm({
             justify-center
             rounded-xl
             bg-slate-100
+            text-lg
             text-slate-400
             transition
             hover:bg-slate-200
             hover:text-slate-700
+            disabled:cursor-not-allowed
+            disabled:opacity-40
           "
         >
           ×
@@ -1835,31 +2992,58 @@ function TransactionForm({
 
       </div>
 
-      {/* FORM */}
+
+      {/* =================================================
+          FORM
+      ================================================= */}
 
       <form
         onSubmit={submit}
-        className="grid grid-cols-1 gap-5 md:grid-cols-2"
+        className="
+          grid
+          grid-cols-1
+          gap-5
+          md:grid-cols-2
+        "
       >
 
-        {/* NOMINAL */}
+        {/* =================================================
+            NOMINAL
+        ================================================= */}
 
         <div>
 
-          <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+          <label className="
+            mb-1.5
+            block
+            text-xs
+            font-semibold
+            text-slate-500
+          ">
             Nominal
           </label>
 
+
           <div className="relative">
 
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">
+            <span className="
+              absolute
+              left-3
+              top-1/2
+              -translate-y-1/2
+              text-sm
+              font-semibold
+              text-slate-400
+            ">
               Rp
             </span>
+
 
             <input
               type="text"
               inputMode="numeric"
               required
+              disabled={processing}
               placeholder="0"
               value={form.amount}
               onChange={
@@ -1884,38 +3068,59 @@ function TransactionForm({
                 focus:border-blue-400
                 focus:ring-2
                 focus:ring-blue-100
+                disabled:cursor-not-allowed
+                disabled:bg-slate-50
               "
             />
 
           </div>
 
-          <p className="mt-1.5 text-[11px] text-slate-400">
+
+          <p className="
+            mt-1.5
+            text-[11px]
+            text-slate-400
+          ">
             Nominal otomatis menggunakan
             pemisah ribuan.
           </p>
 
         </div>
 
-        {/* CATEGORY */}
+
+        {/* =================================================
+            CATEGORY
+        ================================================= */}
 
         {type !== 'transfer' && (
+
           <div>
 
-            <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+            <label className="
+              mb-1.5
+              block
+              text-xs
+              font-semibold
+              text-slate-500
+            ">
               Kategori
             </label>
 
+
             <select
               required
+              disabled={processing}
               value={
                 form.categoryId
               }
               onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  categoryId:
-                    e.target.value,
-                }))
+                setForm(
+                  (prev) => ({
+                    ...prev,
+                    categoryId:
+                      e.target.value,
+                  })
+                )
               }
               className="
                 h-11
@@ -1931,6 +3136,8 @@ function TransactionForm({
                 focus:border-blue-400
                 focus:ring-2
                 focus:ring-blue-100
+                disabled:cursor-not-allowed
+                disabled:bg-slate-50
               "
             >
 
@@ -1938,45 +3145,64 @@ function TransactionForm({
                 Pilih kategori
               </option>
 
+
               {filteredCategories.map(
                 (category) => (
+
                   <option
                     key={category.id}
                     value={category.id}
                   >
                     {category.name}
                   </option>
+
                 )
               )}
 
             </select>
 
           </div>
+
         )}
 
-        {/* ACCOUNT */}
+
+        {/* =================================================
+            ACCOUNT
+        ================================================= */}
 
         <div>
 
-          <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+          <label className="
+            mb-1.5
+            block
+            text-xs
+            font-semibold
+            text-slate-500
+          ">
+
             {type === 'transfer'
               ? 'Rekening Sumber'
               : type === 'income'
               ? 'Rekening Tujuan'
               : 'Rekening Sumber'}
+
           </label>
+
 
           <select
             required
+            disabled={processing}
             value={
               form.accountId
             }
             onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                accountId:
-                  e.target.value,
-              }))
+              setForm(
+                (prev) => ({
+                  ...prev,
+                  accountId:
+                    e.target.value,
+                })
+              )
             }
             className="
               h-11
@@ -1992,6 +3218,8 @@ function TransactionForm({
               focus:border-blue-400
               focus:ring-2
               focus:ring-blue-100
+              disabled:cursor-not-allowed
+              disabled:bg-slate-50
             "
           >
 
@@ -1999,41 +3227,64 @@ function TransactionForm({
               Pilih rekening
             </option>
 
-            {accounts.map(
-              (account) => (
-                <option
-                  key={account.id}
-                  value={account.id}
-                >
-                  {account.name}
-                </option>
+
+            {accounts
+              .filter(
+                (account) =>
+                  account.isActive !==
+                  false
               )
-            )}
+              .map(
+                (account) => (
+
+                  <option
+                    key={account.id}
+                    value={account.id}
+                  >
+                    {account.name}
+                  </option>
+
+                )
+              )}
 
           </select>
 
         </div>
 
-        {/* TARGET ACCOUNT */}
+
+        {/* =================================================
+            TARGET ACCOUNT
+        ================================================= */}
 
         {type === 'transfer' && (
+
           <div>
 
-            <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+            <label className="
+              mb-1.5
+              block
+              text-xs
+              font-semibold
+              text-slate-500
+            ">
               Rekening Tujuan
             </label>
 
+
             <select
               required
+              disabled={processing}
               value={
                 form.toAccountId
               }
               onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  toAccountId:
-                    e.target.value,
-                }))
+                setForm(
+                  (prev) => ({
+                    ...prev,
+                    toAccountId:
+                      e.target.value,
+                  })
+                )
               }
               className="
                 h-11
@@ -2049,6 +3300,8 @@ function TransactionForm({
                 focus:border-blue-400
                 focus:ring-2
                 focus:ring-blue-100
+                disabled:cursor-not-allowed
+                disabled:bg-slate-50
               "
             >
 
@@ -2056,45 +3309,69 @@ function TransactionForm({
                 Pilih rekening
               </option>
 
+
               {accounts
                 .filter(
                   (account) =>
-                    account.id !==
-                    form.accountId
+                    String(
+                      account.id
+                    ) !==
+                      String(
+                        form.accountId
+                      ) &&
+                    account.isActive !==
+                      false
                 )
                 .map(
                   (account) => (
+
                     <option
                       key={account.id}
                       value={account.id}
                     >
                       {account.name}
                     </option>
+
                   )
                 )}
 
             </select>
 
           </div>
+
         )}
 
-        {/* DATE */}
+
+        {/* =================================================
+            DATE
+        ================================================= */}
 
         <div>
 
-          <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+          <label className="
+            mb-1.5
+            block
+            text-xs
+            font-semibold
+            text-slate-500
+          ">
             Tanggal
           </label>
+
 
           <input
             type="date"
             required
+            disabled={processing}
             value={form.date}
             onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                date: e.target.value,
-              }))
+              setForm(
+                (prev) => ({
+                  ...prev,
+                  date:
+                    e.target.value,
+                })
+              )
             }
             className="
               h-11
@@ -2110,32 +3387,59 @@ function TransactionForm({
               focus:border-blue-400
               focus:ring-2
               focus:ring-blue-100
+              disabled:cursor-not-allowed
+              disabled:bg-slate-50
             "
           />
 
         </div>
 
-        {/* NOTE */}
 
-        <div className="md:col-span-2">
+        {/* =================================================
+            NOTE
+        ================================================= */}
 
-          <label className="mb-1.5 block text-xs font-semibold text-slate-500">
+        <div className="
+          md:col-span-2
+        ">
+
+          <label className="
+            mb-1.5
+            block
+            text-xs
+            font-semibold
+            text-slate-500
+          ">
+
             Catatan
-            <span className="ml-1 font-normal text-slate-400">
+
+            <span className="
+              ml-1
+              font-normal
+              text-slate-400
+            ">
               (opsional)
             </span>
+
           </label>
+
 
           <input
             type="text"
+            disabled={processing}
             value={form.note}
             onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                note: e.target.value,
-              }))
+              setForm(
+                (prev) => ({
+                  ...prev,
+                  note:
+                    e.target.value,
+                })
+              )
             }
-            placeholder="Contoh: Belanja bulanan, gaji Agustus..."
+            placeholder="
+              Contoh: Belanja bulanan, gaji Agustus...
+            "
             className="
               h-11
               w-full
@@ -2151,25 +3455,51 @@ function TransactionForm({
               focus:border-blue-400
               focus:ring-2
               focus:ring-blue-100
+              disabled:cursor-not-allowed
+              disabled:bg-slate-50
             "
           />
 
         </div>
 
-        {/* ERROR */}
 
-        {error && (
-          <div className="md:col-span-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
-            {error}
+        {/* =================================================
+            FORM ERROR
+        ================================================= */}
+
+        {formError && (
+
+          <div className="
+            rounded-xl
+            border
+            border-red-100
+            bg-red-50
+            px-4
+            py-3
+            text-sm
+            text-red-600
+            md:col-span-2
+          ">
+            {formError}
           </div>
+
         )}
 
-        {/* ACTION */}
 
-        <div className="flex justify-end gap-2 md:col-span-2">
+        {/* =================================================
+            ACTION
+        ================================================= */}
+
+        <div className="
+          flex
+          justify-end
+          gap-2
+          md:col-span-2
+        ">
 
           <button
             type="button"
+            disabled={processing}
             onClick={onClose}
             className="
               rounded-xl
@@ -2183,14 +3513,17 @@ function TransactionForm({
               text-slate-600
               transition
               hover:bg-slate-50
+              disabled:cursor-not-allowed
+              disabled:opacity-40
             "
           >
             Batal
           </button>
 
+
           <button
             type="submit"
-            disabled={saving}
+            disabled={processing}
             className="
               rounded-xl
               bg-blue-600
@@ -2206,9 +3539,7 @@ function TransactionForm({
               disabled:opacity-60
             "
           >
-            {saving
-              ? 'Menyimpan...'
-              : 'Simpan Transaksi'}
+            Simpan Transaksi
           </button>
 
         </div>
@@ -2216,5 +3547,983 @@ function TransactionForm({
       </form>
 
     </section>
+  );
+}
+
+
+// =========================================================
+// TRANSACTION ROW
+// =========================================================
+
+function TransactionRow({
+  item,
+}) {
+
+  const amount =
+    Number(item.amount) || 0;
+
+
+  let amountPrefix = '';
+
+
+  if (
+    item.type === 'INCOME'
+  ) {
+
+    amountPrefix = '+ ';
+
+  }
+
+
+  if (
+    item.type === 'EXPENSE'
+  ) {
+
+    amountPrefix = '- ';
+
+  }
+
+
+  return (
+    <tr className="
+      group
+      transition
+      hover:bg-slate-50/80
+    ">
+
+      <td className="
+        px-4
+        py-4
+      ">
+
+        <div className="
+          font-medium
+          text-slate-700
+        ">
+          {formatDate(
+            item.date
+          )}
+        </div>
+
+      </td>
+
+
+      <td className="
+        px-4
+        py-4
+      ">
+
+        <span
+          className={`
+            inline-flex
+            rounded-full
+            border
+            px-3
+            py-1
+            text-xs
+            font-semibold
+            ${TX_COLOR[item.type]}
+            ${TX_BG[item.type]}
+          `}
+        >
+          {TX_LABEL[item.type] ||
+            item.type}
+        </span>
+
+      </td>
+
+
+      <td className="
+        px-4
+        py-4
+        text-slate-700
+      ">
+        {item.category?.name ||
+          '-'}
+      </td>
+
+
+      <td className="
+        px-4
+        py-4
+        text-slate-700
+      ">
+        {item.account?.name ||
+          '-'}
+      </td>
+
+
+      <td className="
+        max-w-[260px]
+        px-4
+        py-4
+        text-slate-500
+      ">
+
+        <span
+          className="
+            block
+            truncate
+          "
+          title={
+            item.note ||
+            item.description ||
+            '-'
+          }
+        >
+          {item.note ||
+            item.description ||
+            '-'}
+        </span>
+
+      </td>
+
+
+      <td
+        className={`
+          px-4
+          py-4
+          text-right
+          font-semibold
+          ${TX_COLOR[item.type]}
+        `}
+      >
+        {amountPrefix}
+        {formatRupiah(
+          amount
+        )}
+      </td>
+
+    </tr>
+  );
+}
+
+
+// =========================================================
+// SUMMARY CARD
+// =========================================================
+
+function SummaryCard({
+  label,
+  value,
+  color,
+}) {
+
+  const colors = {
+
+    emerald:
+      'border-emerald-100 bg-emerald-50/70 text-emerald-600',
+
+    red:
+      'border-red-100 bg-red-50/70 text-red-600',
+
+    blue:
+      'border-blue-100 bg-blue-50/70 text-blue-600',
+
+    slate:
+      'border-slate-200 bg-slate-50 text-slate-600',
+
+  };
+
+
+  return (
+    <div
+      className={`
+        rounded-[1.5rem]
+        border
+        p-5
+        ${colors[color] || colors.slate}
+      `}
+    >
+
+      <p className="
+        text-xs
+        font-semibold
+        uppercase
+        tracking-wide
+        opacity-70
+      ">
+        {label}
+      </p>
+
+
+      <p className="
+        mt-2
+        text-xl
+        font-bold
+      ">
+        {formatRupiah(
+          value
+        )}
+      </p>
+
+    </div>
+  );
+}
+
+
+// =========================================================
+// QUICK BUTTON
+// =========================================================
+
+function QuickBtn({
+  label,
+  color,
+  onClick,
+}) {
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`
+        rounded-xl
+        px-4
+        py-2.5
+        text-sm
+        font-semibold
+        text-white
+        shadow-sm
+        transition
+        hover:-translate-y-0.5
+        hover:shadow-md
+        ${color}
+      `}
+    >
+      {label}
+    </button>
+  );
+}
+
+
+// =========================================================
+// QUICK PERIOD
+// =========================================================
+
+function QuickPeriodBtn({
+  label,
+  onClick,
+  disabled,
+}) {
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="
+        rounded-lg
+        border
+        border-slate-200
+        bg-white
+        px-2.5
+        py-1.5
+        text-[11px]
+        font-medium
+        text-slate-500
+        transition
+        hover:border-blue-200
+        hover:bg-blue-50
+        hover:text-blue-600
+        disabled:cursor-not-allowed
+        disabled:opacity-40
+      "
+    >
+      {label}
+    </button>
+  );
+}
+
+
+// =========================================================
+// FILTER SELECT
+// =========================================================
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+  disabled,
+}) {
+
+  return (
+    <div>
+
+      <label className="
+        mb-1.5
+        block
+        text-xs
+        font-semibold
+        text-slate-500
+      ">
+        {label}
+      </label>
+
+
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+          )
+        }
+        className="
+          h-10
+          w-full
+          rounded-xl
+          border
+          border-slate-200
+          bg-white
+          px-3
+          text-sm
+          text-slate-700
+          outline-none
+          transition
+          focus:border-blue-400
+          focus:ring-2
+          focus:ring-blue-100
+          disabled:cursor-not-allowed
+          disabled:bg-slate-50
+        "
+      >
+        {children}
+      </select>
+
+    </div>
+  );
+}
+
+
+// =========================================================
+// DATE INPUT
+// =========================================================
+
+function DateInput({
+  label,
+  value,
+  min,
+  onChange,
+  disabled,
+}) {
+
+  return (
+    <div>
+
+      <label className="
+        mb-1.5
+        block
+        text-xs
+        font-medium
+        text-slate-500
+      ">
+        {label}
+      </label>
+
+
+      <input
+        type="date"
+        disabled={disabled}
+        value={value}
+        min={min}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+          )
+        }
+        className="
+          h-10
+          w-full
+          rounded-xl
+          border
+          border-slate-200
+          bg-white
+          px-3
+          text-sm
+          text-slate-700
+          outline-none
+          transition
+          focus:border-blue-400
+          focus:ring-2
+          focus:ring-blue-100
+          disabled:cursor-not-allowed
+          disabled:bg-slate-50
+        "
+      />
+
+    </div>
+  );
+}
+
+
+// =========================================================
+// EMPTY STATE
+// =========================================================
+
+function EmptyState({
+  hasFilter,
+  onReset,
+}) {
+
+  return (
+    <div className="
+      flex
+      flex-col
+      items-center
+      justify-center
+      rounded-2xl
+      border
+      border-dashed
+      border-slate-200
+      px-6
+      py-14
+      text-center
+    ">
+
+      <div className="
+        flex
+        h-14
+        w-14
+        items-center
+        justify-center
+        rounded-2xl
+        bg-slate-100
+        text-xl
+        text-slate-400
+      ">
+        Rp
+      </div>
+
+
+      <h3 className="
+        mt-4
+        font-semibold
+        text-slate-700
+      ">
+
+        {hasFilter
+          ? 'Transaksi tidak ditemukan'
+          : 'Belum ada transaksi'}
+
+      </h3>
+
+
+      <p className="
+        mt-1
+        max-w-sm
+        text-sm
+        leading-6
+        text-slate-400
+      ">
+
+        {hasFilter
+          ? 'Coba ubah periode atau filter yang dipilih untuk menemukan transaksi lainnya.'
+          : 'Belum ada transaksi yang tercatat. Yuk mulai catat transaksi pertama.'}
+
+      </p>
+
+
+      {hasFilter && (
+
+        <button
+          type="button"
+          onClick={onReset}
+          className="
+            mt-4
+            rounded-xl
+            bg-blue-600
+            px-4
+            py-2
+            text-sm
+            font-semibold
+            text-white
+            transition
+            hover:bg-blue-700
+          "
+        >
+          Reset Filter
+        </button>
+
+      )}
+
+    </div>
+  );
+}
+
+
+// =========================================================
+// SKELETON
+// =========================================================
+
+function TransactionSkeleton() {
+
+  return (
+    <div className="
+      space-y-3
+      py-3
+    ">
+
+      {[
+        1,
+        2,
+        3,
+        4,
+        5,
+      ].map(
+        (item) => (
+
+          <div
+            key={item}
+            className="
+              flex
+              animate-pulse
+              items-center
+              gap-4
+              rounded-xl
+              border
+              border-slate-100
+              p-4
+            "
+          >
+
+            <div className="
+              h-4
+              w-24
+              rounded
+              bg-slate-100
+            " />
+
+
+            <div className="
+              h-6
+              w-24
+              rounded-full
+              bg-slate-100
+            " />
+
+
+            <div className="
+              h-4
+              w-28
+              rounded
+              bg-slate-100
+            " />
+
+
+            <div className="
+              h-4
+              w-32
+              rounded
+              bg-slate-100
+            " />
+
+
+            <div className="
+              h-4
+              flex-1
+              rounded
+              bg-slate-100
+            " />
+
+
+            <div className="
+              h-4
+              w-28
+              rounded
+              bg-slate-100
+            " />
+
+          </div>
+
+        )
+      )}
+
+    </div>
+  );
+}
+
+
+// =========================================================
+// SUCCESS POPUP
+// =========================================================
+
+function SuccessPopup({
+  title,
+  message,
+  onClose,
+}) {
+  return (
+    <>
+      <style>
+        {`
+          @keyframes famfinSuccessBackdrop {
+            from {
+              opacity: 0;
+            }
+
+            to {
+              opacity: 1;
+            }
+          }
+
+          @keyframes famfinSuccessModal {
+            from {
+              opacity: 0;
+              transform: translateY(12px) scale(0.96);
+            }
+
+            to {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          @keyframes famfinSuccessIcon {
+            0% {
+              opacity: 0;
+              transform: scale(0.65);
+            }
+
+            65% {
+              opacity: 1;
+              transform: scale(1.08);
+            }
+
+            100% {
+              opacity: 1;
+              transform: scale(1);
+            }
+          }
+
+          @keyframes famfinSuccessCheck {
+            from {
+              stroke-dashoffset: 32;
+            }
+
+            to {
+              stroke-dashoffset: 0;
+            }
+          }
+
+          @keyframes famfinSuccessProgress {
+            from {
+              transform: scaleX(0);
+            }
+
+            to {
+              transform: scaleX(1);
+            }
+          }
+        `}
+      </style>
+
+      <div
+        className="
+          fixed
+          inset-0
+          z-[10000]
+          flex
+          items-center
+          justify-center
+          bg-slate-900/30
+          px-4
+          backdrop-blur-[2px]
+        "
+        style={{
+          animation:
+            'famfinSuccessBackdrop 180ms ease-out forwards',
+        }}
+      >
+
+        <div
+          className="
+            w-full
+            max-w-md
+            overflow-hidden
+            rounded-[1.5rem]
+            border
+            border-slate-200
+            bg-white
+            shadow-2xl
+            ring-1
+            ring-black/5
+          "
+          style={{
+            animation:
+              'famfinSuccessModal 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards',
+          }}
+        >
+
+          <div className="px-6 pb-6 pt-7 sm:px-7">
+
+            <div className="flex justify-center">
+
+              <div
+                className="
+                  flex
+                  h-16
+                  w-16
+                  items-center
+                  justify-center
+                  rounded-full
+                  bg-emerald-50
+                  ring-8
+                  ring-emerald-50/50
+                "
+                style={{
+                  animation:
+                    'famfinSuccessIcon 420ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both',
+                }}
+              >
+
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  className="h-8 w-8 text-emerald-600"
+                >
+
+                  <path
+                    d="M5 12.5l4 4L19 6.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeDasharray="32"
+                    strokeDashoffset="32"
+                    style={{
+                      animation:
+                        'famfinSuccessCheck 420ms ease-out 220ms forwards',
+                    }}
+                  />
+
+                </svg>
+
+              </div>
+
+            </div>
+
+            <div className="mt-5 text-center">
+
+              <h3 className="text-base font-bold text-slate-900">
+                {title}
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                {message}
+              </p>
+
+              <div className="mt-3 inline-flex items-center gap-1.5">
+
+                <span
+                  className="
+                    flex
+                    h-4
+                    w-4
+                    items-center
+                    justify-center
+                    rounded-full
+                    bg-emerald-100
+                    text-emerald-600
+                  "
+                >
+
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    className="h-2.5 w-2.5"
+                  >
+
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M5 12.5l4 4L19 6.5"
+                    />
+
+                  </svg>
+
+                </span>
+
+                <span className="text-[11px] font-medium text-emerald-600">
+                  Perubahan berhasil disimpan
+                </span>
+
+              </div>
+
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="
+                mt-6
+                w-full
+                rounded-xl
+                bg-emerald-600
+                px-4
+                py-3
+                text-sm
+                font-semibold
+                text-white
+                shadow-sm
+                transition
+                hover:bg-emerald-700
+                hover:shadow-md
+                active:scale-[0.99]
+              "
+            >
+              Selesai
+            </button>
+
+          </div>
+
+          <div className="h-1.5 bg-emerald-50">
+
+            <div
+              className="
+                h-full
+                w-full
+                origin-left
+                bg-emerald-500
+              "
+              style={{
+                animation:
+                  'famfinSuccessProgress 3s linear forwards',
+              }}
+            />
+
+          </div>
+
+        </div>
+
+      </div>
+    </>
+  );
+}
+
+
+// =========================================================
+// ERROR POPUP
+// =========================================================
+
+function ErrorPopup({
+  title,
+  message,
+  onClose,
+}) {
+  return (
+    <div
+      className="
+        fixed
+        inset-0
+        z-[10001]
+        flex
+        items-center
+        justify-center
+        bg-slate-900/30
+        px-4
+        backdrop-blur-[2px]
+      "
+    >
+
+      <div
+        className="
+          w-full
+          max-w-md
+          overflow-hidden
+          rounded-2xl
+          border
+          border-slate-200
+          bg-white
+          shadow-2xl
+          ring-1
+          ring-black/5
+        "
+      >
+
+        <div className="p-6">
+
+          <div className="flex justify-center">
+
+            <div
+              className="
+                flex
+                h-14
+                w-14
+                items-center
+                justify-center
+                rounded-full
+                bg-red-50
+                text-red-600
+              "
+            >
+
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-7 w-7"
+              >
+
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 6l12 12M18 6L6 18"
+                />
+
+              </svg>
+
+            </div>
+
+          </div>
+
+          <div className="mt-4 text-center">
+
+            <h3 className="text-base font-bold text-slate-900">
+              {title}
+            </h3>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              {message}
+            </p>
+
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="
+              mt-6
+              w-full
+              rounded-xl
+              bg-red-600
+              px-4
+              py-2.5
+              text-sm
+              font-semibold
+              text-white
+              shadow-sm
+              transition
+              hover:bg-red-700
+              hover:shadow-md
+            "
+          >
+            Mengerti
+          </button>
+
+        </div>
+
+        <div className="h-1 bg-red-50">
+
+          <div className="h-full w-full bg-red-500" />
+
+        </div>
+
+      </div>
+
+    </div>
   );
 }

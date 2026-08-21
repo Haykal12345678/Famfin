@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+
 import {
   Wallet,
   TrendingUp,
@@ -14,6 +14,14 @@ import {
   Receipt,
   Target,
   AlertCircle,
+  BarChart3,
+  PieChart as PieChartIcon,
+  Activity,
+  CircleDollarSign,
+  Percent,
+  ArrowRight,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 
 import {
@@ -48,27 +56,90 @@ const CHART_COLORS = [
   "#ec4899",
   "#14b8a6",
   "#f97316",
+  "#6366f1",
+  "#84cc16",
 ];
 
 const DEFAULT_DATA = {
-  totalSaldo: 0,
-  totalIncome: 0,
-  totalExpense: 0,
-  cashFlow: 0,
+  summary: {
+    totalIncome: 0,
+    totalExpense: 0,
+    balance: 0,
+    transactionCount: 0,
+    totalAccountBalance: 0,
+    accountCount: 0,
+  },
 
   accounts: [],
+
   recentTransactions: [],
+
   expenseByCategory: [],
-  expenseByAccount: [],
+
+  incomeByCategory: [],
 
   budgets: [],
-  savingGoals: [],
 
-  statistics: {
-    categoryCount: 0,
-    transactionCount: 0,
-    budgetCount: 0,
+  goals: [],
+
+  filters: {
+    startDate: null,
+    endDate: null,
   },
+};
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+const toNumber = (value) => {
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : 0;
+};
+
+const formatDate = (date) => {
+  if (!date) return "-";
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "-";
+  }
+
+  return parsed.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const getCategoryName = (item) => {
+  return (
+    item?.categoryName ||
+    item?.category?.name ||
+    item?.name ||
+    "Tanpa Kategori"
+  );
+};
+
+const getAccountName = (item) => {
+  return (
+    item?.accountName ||
+    item?.account?.name ||
+    item?.name ||
+    "Rekening"
+  );
+};
+
+const getCategoryValue = (item) => {
+  return toNumber(
+    item?.amount ??
+      item?.total ??
+      item?.value ??
+      item?.expense ??
+      item?.income
+  );
 };
 
 /* =========================================================
@@ -76,8 +147,6 @@ const DEFAULT_DATA = {
 ========================================================= */
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-
   const [data, setData] = useState(DEFAULT_DATA);
 
   const [period, setPeriod] = useState("this_month");
@@ -101,28 +170,53 @@ export default function Dashboard() {
         },
       });
 
+      const responseData = res?.data || {};
+
       setData({
         ...DEFAULT_DATA,
-        ...(res.data || {}),
+        ...responseData,
 
-        accounts: res.data?.accounts || [],
-        recentTransactions: res.data?.recentTransactions || [],
-        expenseByCategory: res.data?.expenseByCategory || [],
-        expenseByAccount: res.data?.expenseByAccount || [],
-
-        budgets: res.data?.budgets || [],
-        savingGoals: res.data?.savingGoals || [],
-
-        statistics: {
-          ...DEFAULT_DATA.statistics,
-          ...(res.data?.statistics || {}),
+        summary: {
+          ...DEFAULT_DATA.summary,
+          ...(responseData.summary || {}),
         },
+
+        accounts: Array.isArray(responseData.accounts)
+          ? responseData.accounts
+          : [],
+
+        recentTransactions: Array.isArray(
+          responseData.recentTransactions
+        )
+          ? responseData.recentTransactions
+          : [],
+
+        expenseByCategory: Array.isArray(
+          responseData.expenseByCategory
+        )
+          ? responseData.expenseByCategory
+          : [],
+
+        incomeByCategory: Array.isArray(
+          responseData.incomeByCategory
+        )
+          ? responseData.incomeByCategory
+          : [],
+
+        budgets: Array.isArray(responseData.budgets)
+          ? responseData.budgets
+          : [],
+
+        goals: Array.isArray(responseData.goals)
+          ? responseData.goals
+          : [],
       });
     } catch (err) {
       console.error("Dashboard error:", err);
 
       setError(
-        err.response?.data?.message ||
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
           "Gagal memuat dashboard. Silakan coba lagi."
       );
     } finally {
@@ -135,120 +229,160 @@ export default function Dashboard() {
   }, [period]);
 
   /* =======================================================
-     HELPERS
+     SUMMARY
   ======================================================= */
 
-  const getTransactionCategory = (trx) => {
-    if (typeof trx.category === "string") {
-      return trx.category;
-    }
+  const summary = data.summary || DEFAULT_DATA.summary;
 
-    if (trx.category?.name) {
-      return trx.category.name;
-    }
+  const totalIncome = toNumber(summary.totalIncome);
 
-    return "Tanpa Kategori";
-  };
+  const totalExpense = toNumber(summary.totalExpense);
 
-  const getTransactionDescription = (trx) => {
-    return (
-      trx.description ||
-      trx.note ||
-      trx.title ||
-      "Transaksi"
-    );
-  };
+  const cashFlow = toNumber(summary.balance);
 
-  const getTransactionDate = (trx) => {
-    if (trx.date) return trx.date;
+  const totalAccountBalance = toNumber(
+    summary.totalAccountBalance
+  );
 
-    if (trx.transactionDate) {
-      return trx.transactionDate;
-    }
+  const transactionCount = toNumber(
+    summary.transactionCount
+  );
 
-    if (trx.createdAt) {
-      return new Date(trx.createdAt).toLocaleDateString(
-        "id-ID"
-      );
-    }
-
-    return "-";
-  };
-
-  const getExpenseCategoryName = (item) => {
-    if (item.name) return item.name;
-
-    if (item.category?.name) {
-      return item.category.name;
-    }
-
-    if (item.categoryName) {
-      return item.categoryName;
-    }
-
-    return "Tanpa Kategori";
-  };
-
-  const getExpenseCategoryValue = (item) => {
-    return Number(
-      item.total ??
-        item.amount ??
-        item.value ??
-        item.expense ??
-        0
-    );
-  };
-
-  const getExpenseAccountName = (item) => {
-    if (item.name) return item.name;
-
-    if (item.account?.name) {
-      return item.account.name;
-    }
-
-    if (item.accountName) {
-      return item.accountName;
-    }
-
-    return "Rekening";
-  };
-
-  const getExpenseAccountValue = (item) => {
-    return Number(
-      item.total ??
-        item.amount ??
-        item.value ??
-        item.expense ??
-        0
-    );
-  };
+  const accountCount = toNumber(
+    summary.accountCount
+  );
 
   /* =======================================================
-     NORMALIZE CHART DATA
+     FINANCIAL METRICS
   ======================================================= */
 
-  const expenseCategoryChartData =
-    (data.expenseByCategory || [])
-      .map((item) => ({
-        name: getExpenseCategoryName(item),
-        total: getExpenseCategoryValue(item),
-      }))
-      .filter((item) => item.total > 0);
+  const expenseRatio =
+    totalIncome > 0
+      ? (totalExpense / totalIncome) * 100
+      : 0;
 
-  const expenseAccountChartData =
-    (data.expenseByAccount || [])
+  const savingRatio =
+    totalIncome > 0
+      ? (cashFlow / totalIncome) * 100
+      : 0;
+
+  const averageTransaction =
+    transactionCount > 0
+      ? (totalIncome + totalExpense) /
+        transactionCount
+      : 0;
+
+  /* =======================================================
+     CHART DATA
+  ======================================================= */
+
+  const expenseCategoryChartData = useMemo(() => {
+    return (data.expenseByCategory || [])
       .map((item) => ({
-        name: getExpenseAccountName(item),
-        total: getExpenseAccountValue(item),
+        name: getCategoryName(item),
+        total: getCategoryValue(item),
       }))
       .filter((item) => item.total > 0);
+  }, [data.expenseByCategory]);
+
+  const incomeCategoryChartData = useMemo(() => {
+    return (data.incomeByCategory || [])
+      .map((item) => ({
+        name: getCategoryName(item),
+        total: getCategoryValue(item),
+      }))
+      .filter((item) => item.total > 0);
+  }, [data.incomeByCategory]);
+
+  /*
+   * Backend yang kamu kirim sebelumnya belum mengirim
+   * expenseByAccount.
+   *
+   * Jadi kita hitung dari recentTransactions sebagai
+   * fallback sementara.
+   */
+
+  const expenseAccountChartData = useMemo(() => {
+    const map = new Map();
+
+    (data.recentTransactions || []).forEach(
+      (transaction) => {
+        if (
+          String(transaction?.type).toUpperCase() !==
+          "EXPENSE"
+        ) {
+          return;
+        }
+
+        const accountName = getAccountName(
+          transaction
+        );
+
+        const amount = toNumber(
+          transaction.amount
+        );
+
+        map.set(
+          accountName,
+          (map.get(accountName) || 0) + amount
+        );
+      }
+    );
+
+    return Array.from(map.entries())
+      .map(([name, total]) => ({
+        name,
+        total,
+      }))
+      .filter((item) => item.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+  }, [data.recentTransactions]);
+
+  /* =======================================================
+     INSIGHTS
+  ======================================================= */
+
+  const topExpenseCategory =
+    expenseCategoryChartData[0];
+
+  const topIncomeCategory =
+    incomeCategoryChartData[0];
+
+  const almostFinishedBudgets = (
+    data.budgets || []
+  ).filter((budget) => {
+    const percentage = toNumber(
+      budget.percentage
+    );
+
+    return percentage >= 70;
+  });
+
+  const activeGoals = (data.goals || []).filter(
+    (goal) => !goal.isCompleted
+  );
+
+  const nearestGoal = [...activeGoals].sort(
+    (a, b) => {
+      const dateA = new Date(
+        a.targetDate || "9999-12-31"
+      );
+
+      const dateB = new Date(
+        b.targetDate || "9999-12-31"
+      );
+
+      return dateA - dateB;
+    }
+  )[0];
 
   /* =======================================================
      RENDER
   ======================================================= */
 
   return (
-    <div className="space-y-6 pb-8">
+    <div className="space-y-6 pb-10">
 
       {/* =====================================================
           HEADER
@@ -259,12 +393,11 @@ export default function Dashboard() {
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
           <div>
-
             <div className="flex items-center gap-3">
 
               <div>
 
-                <h1 className="text-2xl font-bold text-slate-00 sm:text-3xl">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                   Dashboard
                 </h1>
 
@@ -275,12 +408,9 @@ export default function Dashboard() {
               </div>
 
             </div>
-
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-
-            {/* PERIOD */}
 
             <div className="relative">
 
@@ -312,7 +442,6 @@ export default function Dashboard() {
                   focus:ring-brand-100
                 "
               >
-
                 <option value="today">
                   Hari Ini
                 </option>
@@ -336,12 +465,9 @@ export default function Dashboard() {
                 <option value="this_year">
                   Tahun Ini
                 </option>
-
               </select>
 
             </div>
-
-            {/* REFRESH */}
 
             <button
               type="button"
@@ -365,7 +491,6 @@ export default function Dashboard() {
                 disabled:opacity-50
               "
             >
-
               <RefreshCw
                 size={17}
                 className={
@@ -373,14 +498,13 @@ export default function Dashboard() {
                 }
               />
 
-              {loading ? "Memuat..." : "Refresh"}
-
+              {loading
+                ? "Memuat..."
+                : "Refresh"}
             </button>
 
           </div>
-
         </div>
-
       </div>
 
       {/* =====================================================
@@ -388,7 +512,6 @@ export default function Dashboard() {
       ===================================================== */}
 
       {error && (
-
         <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
 
           <AlertCircle
@@ -417,7 +540,6 @@ export default function Dashboard() {
           </button>
 
         </div>
-
       )}
 
       {/* =====================================================
@@ -429,39 +551,43 @@ export default function Dashboard() {
         <KpiCard
           icon={Wallet}
           title="Total Saldo"
-          value={data.totalSaldo}
+          value={totalAccountBalance}
           color="bg-blue-500"
-          description="Saldo seluruh rekening"
+          description={`${accountCount} rekening aktif`}
         />
 
         <KpiCard
           icon={TrendingUp}
-          title="Total Pemasukan"
-          value={data.totalIncome}
+          title="Pemasukan"
+          value={totalIncome}
           color="bg-emerald-500"
-          description="Pemasukan periode ini"
+          description="Total pemasukan periode"
         />
 
         <KpiCard
           icon={TrendingDown}
-          title="Total Pengeluaran"
-          value={data.totalExpense}
+          title="Pengeluaran"
+          value={totalExpense}
           color="bg-red-500"
-          description="Pengeluaran periode ini"
+          description={`${expenseRatio.toFixed(
+            1
+          )}% dari pemasukan`}
         />
 
         <KpiCard
           icon={Landmark}
           title="Cash Flow"
-          value={data.cashFlow}
+          value={cashFlow}
           color={
-            data.cashFlow >= 0
+            cashFlow >= 0
               ? "bg-violet-500"
               : "bg-orange-500"
           }
           description={
-            data.cashFlow >= 0
-              ? "Arus kas positif"
+            cashFlow >= 0
+              ? `Saving rate ${savingRatio.toFixed(
+                  1
+                )}%`
               : "Arus kas negatif"
           }
         />
@@ -469,7 +595,96 @@ export default function Dashboard() {
       </div>
 
       {/* =====================================================
-          INCOME VS EXPENSE + CASH FLOW
+          FINANCIAL INSIGHT
+      ===================================================== */}
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+        <div className="mb-5 flex items-center gap-3">
+
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+            <BarChart3 size={20} />
+          </div>
+
+          <div>
+
+            <h2 className="text-lg font-semibold text-slate-900">
+              Ringkasan Keuangan
+            </h2>
+
+            <p className="text-sm text-slate-500">
+              Insight singkat dari data periode terpilih.
+            </p>
+
+          </div>
+
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+
+          <InsightCard
+            icon={Percent}
+            title="Expense Ratio"
+            value={`${expenseRatio.toFixed(1)}%`}
+            description={
+              expenseRatio > 100
+                ? "Pengeluaran melebihi pemasukan"
+                : expenseRatio >= 80
+                ? "Pengeluaran cukup tinggi"
+                : "Pengeluaran masih terkendali"
+            }
+            danger={expenseRatio >= 90}
+          />
+
+          <InsightCard
+            icon={Receipt}
+            title="Rata-rata Transaksi"
+            value={formatRupiah(
+              averageTransaction
+            )}
+            description={`${transactionCount} transaksi`}
+          />
+
+          <InsightCard
+            icon={TrendingDown}
+            title="Pengeluaran Terbesar"
+            value={
+              topExpenseCategory
+                ? topExpenseCategory.name
+                : "-"
+            }
+            description={
+              topExpenseCategory
+                ? formatRupiah(
+                    topExpenseCategory.total
+                  )
+                : "Belum ada data"
+            }
+            danger
+          />
+
+          <InsightCard
+            icon={TrendingUp}
+            title="Pemasukan Terbesar"
+            value={
+              topIncomeCategory
+                ? topIncomeCategory.name
+                : "-"
+            }
+            description={
+              topIncomeCategory
+                ? formatRupiah(
+                    topIncomeCategory.total
+                  )
+                : "Belum ada data"
+            }
+          />
+
+        </div>
+      </div>
+
+      {/* =====================================================
+          CASHFLOW CHART
       ===================================================== */}
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -499,8 +714,8 @@ export default function Dashboard() {
               data={[
                 {
                   name: "Periode",
-                  income: Number(data.totalIncome || 0),
-                  expense: Number(data.totalExpense || 0),
+                  income: totalIncome,
+                  expense: totalExpense,
                 },
               ]}
               margin={{
@@ -571,361 +786,295 @@ export default function Dashboard() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                Ringkasan arus kas periode terpilih.
+                Kondisi arus kas periode terpilih.
               </p>
 
             </div>
 
             <div
               className={`rounded-xl p-2 ${
-                data.cashFlow >= 0
+                cashFlow >= 0
                   ? "bg-emerald-50 text-emerald-600"
                   : "bg-red-50 text-red-600"
               }`}
             >
-
-              {data.cashFlow >= 0 ? (
+              {cashFlow >= 0 ? (
                 <ArrowUpRight size={19} />
               ) : (
                 <ArrowDownRight size={19} />
               )}
-
             </div>
 
           </div>
 
-          <ResponsiveContainer
-            width="100%"
-            height={320}
-          >
+          <div className="flex h-[260px] flex-col items-center justify-center">
 
-            <AreaChart
-              data={[
-                {
-                  name: "Cash Flow",
-                  value: Number(data.cashFlow || 0),
-                },
-              ]}
-              margin={{
-                top: 10,
-                right: 10,
-                left: 10,
-                bottom: 10,
-              }}
+            <p className="text-sm text-slate-500">
+              Cash Flow
+            </p>
+
+            <p
+              className={`mt-3 text-4xl font-bold ${
+                cashFlow >= 0
+                  ? "text-emerald-600"
+                  : "text-red-600"
+              }`}
             >
+              {formatRupiah(cashFlow)}
+            </p>
 
-              <defs>
+            <div className="mt-6 grid w-full max-w-sm grid-cols-2 gap-3">
 
-                <linearGradient
-                  id="cashFlowGradient"
-                  x1="0"
-                  y1="0"
-                  x2="0"
-                  y2="1"
-                >
+              <div className="rounded-2xl bg-emerald-50 p-4 text-center">
 
-                  <stop
-                    offset="0%"
-                    stopColor="#2563eb"
-                    stopOpacity={0.35}
-                  />
+                <p className="text-xs text-emerald-600">
+                  Pemasukan
+                </p>
 
-                  <stop
-                    offset="100%"
-                    stopColor="#2563eb"
-                    stopOpacity={0}
-                  />
+                <p className="mt-1 text-sm font-bold text-emerald-700">
+                  {formatRupiah(totalIncome)}
+                </p>
 
-                </linearGradient>
+              </div>
 
-              </defs>
+              <div className="rounded-2xl bg-red-50 p-4 text-center">
 
-              <CartesianGrid
-                strokeDasharray="3 3"
-                vertical={false}
-              />
+                <p className="text-xs text-red-600">
+                  Pengeluaran
+                </p>
 
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 12 }}
-              />
+                <p className="mt-1 text-sm font-bold text-red-700">
+                  {formatRupiah(totalExpense)}
+                </p>
 
-              <YAxis
-                tick={{ fontSize: 11 }}
-                tickFormatter={(value) =>
-                  formatRupiah(value)
-                }
-              />
+              </div>
 
-              <Tooltip
-                formatter={(value) =>
-                  formatRupiah(value)
-                }
-              />
+            </div>
 
-              <Area
-                type="monotone"
-                dataKey="value"
-                name="Cash Flow"
-                stroke="#2563eb"
-                strokeWidth={3}
-                fill="url(#cashFlowGradient)"
-              />
-
-            </AreaChart>
-
-          </ResponsiveContainer>
+          </div>
 
         </div>
 
       </div>
 
       {/* =====================================================
-          EXPENSE DISTRIBUTION
+          EXPENSE / INCOME CATEGORY
       ===================================================== */}
 
       <div className="grid gap-6 xl:grid-cols-2">
 
-        {/* EXPENSE BY CATEGORY */}
+        {/* EXPENSE */}
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <CategoryChart
+          title="Distribusi Pengeluaran"
+          description="Kategori yang paling banyak menyerap pengeluaran."
+          data={expenseCategoryChartData}
+          icon={TrendingDown}
+          emptyText="Belum ada data pengeluaran."
+        />
 
-          <div className="mb-5">
+        {/* INCOME */}
 
-            <h2 className="text-lg font-semibold text-slate-900">
-              Distribusi Pengeluaran
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Kategori yang paling banyak menyerap pengeluaran.
-            </p>
-
-          </div>
-
-          {expenseCategoryChartData.length === 0 ? (
-
-            <EmptyState
-              icon={Receipt}
-              text="Belum ada data pengeluaran."
-            />
-
-          ) : (
-
-            <div className="grid gap-5 md:grid-cols-2">
-
-              {/* PIE */}
-
-              <div className="h-[280px]">
-
-                <ResponsiveContainer
-                  width="100%"
-                  height="100%"
-                >
-
-                  <PieChart>
-
-                    <Pie
-                      data={expenseCategoryChartData}
-                      dataKey="total"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={62}
-                      outerRadius={100}
-                      paddingAngle={3}
-                    >
-
-                      {expenseCategoryChartData.map(
-                        (_, index) => (
-
-                          <Cell
-                            key={`category-${index}`}
-                            fill={
-                              CHART_COLORS[
-                                index %
-                                  CHART_COLORS.length
-                              ]
-                            }
-                          />
-
-                        )
-                      )}
-
-                    </Pie>
-
-                    <Tooltip
-                      formatter={(value) =>
-                        formatRupiah(value)
-                      }
-                    />
-
-                    <Legend
-                      verticalAlign="bottom"
-                      height={36}
-                      wrapperStyle={{
-                        fontSize: "12px",
-                      }}
-                    />
-
-                  </PieChart>
-
-                </ResponsiveContainer>
-
-              </div>
-
-              {/* CATEGORY LIST */}
-
-              <div className="flex flex-col justify-center space-y-2">
-
-                {expenseCategoryChartData
-                  .slice(0, 6)
-                  .map((item, index) => (
-
-                    <div
-                      key={`${item.name}-${index}`}
-                      className="
-                        flex
-                        items-center
-                        justify-between
-                        rounded-2xl
-                        bg-slate-50
-                        px-4
-                        py-3
-                        transition
-                        hover:bg-slate-100
-                      "
-                    >
-
-                      <div className="flex min-w-0 items-center gap-3">
-
-                        <span
-                          className="h-3 w-3 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              CHART_COLORS[
-                                index %
-                                  CHART_COLORS.length
-                              ],
-                          }}
-                        />
-
-                        <span className="truncate text-sm font-medium text-slate-700">
-                          {item.name}
-                        </span>
-
-                      </div>
-
-                      <span className="ml-3 whitespace-nowrap text-sm font-semibold text-slate-900">
-                        {formatRupiah(item.total)}
-                      </span>
-
-                    </div>
-
-                  ))}
-
-              </div>
-
-            </div>
-
-          )}
-
-        </div>
-
-        {/* EXPENSE BY ACCOUNT */}
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-
-          <div className="mb-5">
-
-            <h2 className="text-lg font-semibold text-slate-900">
-              Pengeluaran per Rekening
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Rekening yang paling banyak digunakan untuk pengeluaran.
-            </p>
-
-          </div>
-
-          {expenseAccountChartData.length === 0 ? (
-
-            <EmptyState
-              icon={CreditCard}
-              text="Belum ada data pengeluaran per rekening."
-            />
-
-          ) : (
-
-            <div className="h-[320px]">
-
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-              >
-
-                <BarChart
-                  data={expenseAccountChartData}
-                  layout="vertical"
-                  margin={{
-                    top: 10,
-                    right: 20,
-                    left: 10,
-                    bottom: 10,
-                  }}
-                >
-
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    horizontal={false}
-                  />
-
-                  <XAxis
-                    type="number"
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(value) =>
-                      formatRupiah(value)
-                    }
-                  />
-
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={90}
-                    tick={{ fontSize: 11 }}
-                  />
-
-                  <Tooltip
-                    formatter={(value) =>
-                      formatRupiah(value)
-                    }
-                  />
-
-                  <Bar
-                    dataKey="total"
-                    name="Pengeluaran"
-                    fill="#ef4444"
-                    radius={[0, 8, 8, 0]}
-                  />
-
-                </BarChart>
-
-              </ResponsiveContainer>
-
-            </div>
-
-          )}
-
-        </div>
+        <CategoryChart
+          title="Distribusi Pemasukan"
+          description="Sumber pemasukan terbesar pada periode ini."
+          data={incomeCategoryChartData}
+          icon={TrendingUp}
+          emptyText="Belum ada data pemasukan."
+        />
 
       </div>
 
       {/* =====================================================
-          RECENT TRANSACTIONS + STATISTICS
+          ACCOUNTS
+      ===================================================== */}
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+        <div className="mb-5 flex items-center justify-between">
+
+          <div>
+
+            <h2 className="text-lg font-semibold text-slate-900">
+              Saldo Rekening
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Posisi saldo seluruh rekening yang dapat Anda akses.
+            </p>
+
+          </div>
+
+          <CreditCard
+            size={20}
+            className="text-brand-600"
+          />
+
+        </div>
+
+        {data.accounts.length === 0 ? (
+          <EmptyState
+            icon={CreditCard}
+            text="Belum ada rekening."
+          />
+        ) : (
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+            {data.accounts.map((account) => {
+
+              const balance = toNumber(
+                account.balance
+              );
+
+              return (
+                <div
+                  key={account.id}
+                  className="
+                    rounded-2xl
+                    border
+                    border-slate-100
+                    bg-slate-50
+                    p-4
+                    transition
+                    hover:border-slate-200
+                    hover:bg-white
+                    hover:shadow-sm
+                  "
+                >
+
+                  <div className="flex items-center gap-3">
+
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm">
+                      <Wallet size={19} />
+                    </div>
+
+                    <div className="min-w-0">
+
+                      <p className="truncate font-semibold text-slate-800">
+                        {account.name}
+                      </p>
+
+                      <p className="text-xs text-slate-400">
+                        {account.type || "REKENING"}
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                  <p
+                    className={`mt-4 text-xl font-bold ${
+                      balance >= 0
+                        ? "text-slate-900"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {formatRupiah(balance)}
+                  </p>
+
+                </div>
+              );
+            })}
+
+          </div>
+        )}
+
+      </div>
+
+      {/* =====================================================
+          EXPENSE BY ACCOUNT
+      ===================================================== */}
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+        <div className="mb-5">
+
+          <h2 className="text-lg font-semibold text-slate-900">
+            Pengeluaran per Rekening
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500">
+            Rekening yang paling banyak digunakan untuk pengeluaran.
+          </p>
+
+        </div>
+
+        {expenseAccountChartData.length === 0 ? (
+          <EmptyState
+            icon={CreditCard}
+            text="Belum cukup data transaksi untuk ditampilkan."
+          />
+        ) : (
+
+          <div className="h-[320px]">
+
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+            >
+
+              <BarChart
+                data={expenseAccountChartData}
+                layout="vertical"
+                margin={{
+                  top: 10,
+                  right: 20,
+                  left: 10,
+                  bottom: 10,
+                }}
+              >
+
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  horizontal={false}
+                />
+
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(value) =>
+                    formatRupiah(value)
+                  }
+                />
+
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={100}
+                  tick={{ fontSize: 11 }}
+                />
+
+                <Tooltip
+                  formatter={(value) =>
+                    formatRupiah(value)
+                  }
+                />
+
+                <Bar
+                  dataKey="total"
+                  name="Pengeluaran"
+                  fill="#ef4444"
+                  radius={[0, 8, 8, 0]}
+                />
+
+              </BarChart>
+
+            </ResponsiveContainer>
+
+          </div>
+
+        )}
+
+      </div>
+
+      {/* =====================================================
+          TRANSACTIONS + STATISTICS
       ===================================================== */}
 
       <div className="grid gap-6 xl:grid-cols-3">
 
-        {/* RECENT TRANSACTION */}
+        {/* TRANSACTIONS */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
 
@@ -943,16 +1092,19 @@ export default function Dashboard() {
 
             </div>
 
+            <Receipt
+              size={20}
+              className="text-brand-600"
+            />
+
           </div>
 
-          {!data.recentTransactions ||
-          data.recentTransactions.length === 0 ? (
-
+          {data.recentTransactions.length ===
+          0 ? (
             <EmptyState
               icon={Receipt}
               text="Belum ada transaksi."
             />
-
           ) : (
 
             <div className="space-y-3">
@@ -962,12 +1114,17 @@ export default function Dashboard() {
                 .map((trx) => {
 
                   const isIncome =
-                    trx.type === "INCOME";
+                    String(
+                      trx?.type || ""
+                    ).toUpperCase() ===
+                    "INCOME";
 
                   return (
-
                     <div
-                      key={trx.id}
+                      key={
+                        trx?.id ||
+                        `${trx?.date}-${trx?.amount}`
+                      }
                       className="
                         flex
                         items-center
@@ -987,38 +1144,39 @@ export default function Dashboard() {
                       <div className="flex min-w-0 items-center gap-3">
 
                         <div
-                          className={`
-                            flex
-                            h-10
-                            w-10
-                            shrink-0
-                            items-center
-                            justify-center
-                            rounded-xl
-                            ${
-                              isIncome
-                                ? "bg-emerald-100 text-emerald-600"
-                                : "bg-red-100 text-red-600"
-                            }
-                          `}
+                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                            isIncome
+                              ? "bg-emerald-100 text-emerald-600"
+                              : "bg-red-100 text-red-600"
+                          }`}
                         >
-
                           {isIncome ? (
                             <ArrowUpRight size={19} />
                           ) : (
                             <ArrowDownRight size={19} />
                           )}
-
                         </div>
 
                         <div className="min-w-0">
 
                           <p className="truncate font-semibold text-slate-800">
-                            {getTransactionDescription(trx)}
+                            {trx?.note ||
+                              trx?.description ||
+                              "Transaksi"}
                           </p>
 
                           <p className="mt-0.5 truncate text-xs text-slate-500">
-                            {getTransactionCategory(trx)}
+
+                            {getCategoryName(
+                              trx
+                            )}
+
+                            {" • "}
+
+                            {getAccountName(
+                              trx
+                            )}
+
                           </p>
 
                         </div>
@@ -1034,25 +1192,29 @@ export default function Dashboard() {
                               : "text-red-500"
                           }`}
                         >
-                          {isIncome ? "+" : "-"}
+                          {isIncome
+                            ? "+"
+                            : "-"}
                           {formatRupiah(
-                            trx.amount || 0
+                            toNumber(
+                              trx?.amount
+                            )
                           )}
                         </p>
 
                         <p className="mt-0.5 text-xs text-slate-400">
-                          {getTransactionDate(trx)}
+                          {formatDate(
+                            trx?.date
+                          )}
                         </p>
 
                       </div>
 
                     </div>
-
                   );
                 })}
 
             </div>
-
           )}
 
         </div>
@@ -1070,36 +1232,33 @@ export default function Dashboard() {
             <StatisticCard
               icon={CreditCard}
               title="Total Rekening"
-              value={
-                data.accounts?.length || 0
-              }
+              value={accountCount}
             />
 
             <StatisticCard
               icon={Receipt}
-              title="Kategori"
-              value={
-                data.statistics
-                  ?.categoryCount || 0
-              }
+              title="Transaksi"
+              value={transactionCount}
             />
 
             <StatisticCard
-              icon={TrendingUp}
-              title="Transaksi"
+              icon={PieChartIcon}
+              title="Kategori Expense"
               value={
-                data.statistics
-                  ?.transactionCount || 0
+                expenseCategoryChartData.length
               }
             />
 
             <StatisticCard
               icon={Target}
-              title="Budget Aktif"
-              value={
-                data.statistics
-                  ?.budgetCount || 0
-              }
+              title="Budget"
+              value={data.budgets.length}
+            />
+
+            <StatisticCard
+              icon={PiggyBank}
+              title="Target Tabungan"
+              value={data.goals.length}
             />
 
           </div>
@@ -1109,7 +1268,7 @@ export default function Dashboard() {
       </div>
 
       {/* =====================================================
-          BUDGET + SAVING GOALS
+          BUDGET + GOALS
       ===================================================== */}
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -1123,7 +1282,7 @@ export default function Dashboard() {
             <div>
 
               <h2 className="text-lg font-semibold text-slate-900">
-                Budget Bulan Ini
+                Budget
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
@@ -1139,111 +1298,126 @@ export default function Dashboard() {
 
           </div>
 
-          {!data.budgets ||
-          data.budgets.length === 0 ? (
-
+          {data.budgets.length === 0 ? (
             <EmptyState
               icon={Target}
               text="Belum ada budget."
             />
-
           ) : (
 
             <div className="space-y-5">
 
-              {data.budgets.map((budget) => {
+              {data.budgets.slice(0, 6).map(
+                (budget) => {
 
-                const limit = Number(
-                  budget.limit ??
-                    budget.amount ??
-                    0
-                );
+                  const limit = toNumber(
+                    budget.amount
+                  );
 
-                const used = Number(
-                  budget.used || 0
-                );
+                  const used = toNumber(
+                    budget.used
+                  );
 
-                const percent =
-                  limit > 0
-                    ? Math.min(
-                        100,
-                        (used / limit) * 100
-                      )
-                    : 0;
+                  const percentage =
+                    toNumber(
+                      budget.percentage
+                    );
 
-                const isDanger =
-                  percent >= 90;
+                  const percent =
+                    percentage ||
+                    (limit > 0
+                      ? (used / limit) * 100
+                      : 0);
 
-                return (
+                  return (
+                    <div
+                      key={budget.id}
+                    >
 
-                  <div key={budget.id}>
+                      <div className="mb-2 flex items-center justify-between gap-3">
 
-                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
 
-                      <span className="truncate font-medium text-slate-800">
-                        {budget.name ||
-                          budget.category?.name ||
-                          "Budget"}
-                      </span>
+                          <p className="truncate font-medium text-slate-800">
+                            {budget.categoryName ||
+                              budget.category?.name ||
+                              "Budget"}
+                          </p>
 
-                      <span
-                        className={`shrink-0 text-sm font-semibold ${
-                          isDanger
-                            ? "text-red-600"
-                            : "text-slate-500"
-                        }`}
-                      >
-                        {Math.round(percent)}%
-                      </span>
+                          <p className="text-xs text-slate-400">
+                            {budget.period}
+                          </p>
+
+                        </div>
+
+                        <span
+                          className={`shrink-0 text-sm font-semibold ${
+                            percent >= 90
+                              ? "text-red-600"
+                              : percent >= 70
+                              ? "text-orange-600"
+                              : "text-brand-600"
+                          }`}
+                        >
+                          {Math.round(
+                            percent
+                          )}
+                          %
+                        </span>
+
+                      </div>
+
+                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            percent >= 100
+                              ? "bg-red-500"
+                              : percent >= 90
+                              ? "bg-orange-500"
+                              : percent >= 70
+                              ? "bg-yellow-500"
+                              : "bg-brand-600"
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              percent,
+                              100
+                            )}%`,
+                          }}
+                        />
+
+                      </div>
+
+                      <div className="mt-2 flex justify-between text-xs text-slate-500">
+
+                        <span>
+                          Terpakai{" "}
+                          {formatRupiah(
+                            used
+                          )}
+                        </span>
+
+                        <span>
+                          dari{" "}
+                          {formatRupiah(
+                            limit
+                          )}
+                        </span>
+
+                      </div>
 
                     </div>
-
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          percent >= 100
-                            ? "bg-red-500"
-                            : percent >= 90
-                            ? "bg-orange-500"
-                            : percent >= 70
-                            ? "bg-yellow-500"
-                            : "bg-brand-600"
-                        }`}
-                        style={{
-                          width: `${percent}%`,
-                        }}
-                      />
-
-                    </div>
-
-                    <div className="mt-2 flex justify-between text-xs text-slate-500">
-
-                      <span>
-                        Terpakai{" "}
-                        {formatRupiah(used)}
-                      </span>
-
-                      <span>
-                        dari{" "}
-                        {formatRupiah(limit)}
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                );
-
-              })}
+                  );
+                }
+              )}
 
             </div>
-
           )}
 
         </div>
 
-        {/* SAVING GOALS */}
+        {/* GOALS */}
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
@@ -1256,7 +1430,7 @@ export default function Dashboard() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                Pantau progress target tabungan keluarga.
+                Pantau progress target finansial keluarga.
               </p>
 
             </div>
@@ -1268,91 +1442,260 @@ export default function Dashboard() {
 
           </div>
 
-          {!data.savingGoals ||
-          data.savingGoals.length === 0 ? (
-
+          {data.goals.length === 0 ? (
             <EmptyState
               icon={PiggyBank}
               text="Belum ada target tabungan."
             />
-
           ) : (
 
             <div className="space-y-5">
 
-              {data.savingGoals.map((goal) => {
+              {data.goals.slice(0, 6).map(
+                (goal) => {
 
-                const target = Number(
-                  goal.target ??
-                    goal.targetAmount ??
-                    0
-                );
+                  const target =
+                    toNumber(
+                      goal.targetAmount
+                    );
 
-                const saved = Number(
-                  goal.saved ??
-                    goal.currentAmount ??
-                    0
-                );
+                  const current =
+                    toNumber(
+                      goal.currentAmount
+                    );
 
-                const percent =
-                  target > 0
-                    ? Math.min(
-                        100,
-                        (saved / target) * 100
-                      )
-                    : 0;
+                  const percent =
+                    toNumber(
+                      goal.progressPercentage
+                    ) ||
+                    (target > 0
+                      ? (current / target) *
+                        100
+                      : 0);
 
-                return (
+                  return (
+                    <div
+                      key={goal.id}
+                    >
 
-                  <div key={goal.id}>
+                      <div className="mb-2 flex items-center justify-between gap-3">
 
-                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
 
-                      <span className="truncate font-medium text-slate-800">
-                        {goal.name ||
-                          "Target Tabungan"}
-                      </span>
+                          <p className="truncate font-medium text-slate-800">
+                            {goal.name}
+                          </p>
 
-                      <span className="shrink-0 text-sm font-semibold text-emerald-600">
-                        {Math.round(percent)}%
-                      </span>
+                          {goal.targetDate && (
+                            <p className="text-xs text-slate-400">
+                              Target{" "}
+                              {formatDate(
+                                goal.targetDate
+                              )}
+                            </p>
+                          )}
+
+                        </div>
+
+                        <span
+                          className={`shrink-0 text-sm font-semibold ${
+                            goal.isCompleted
+                              ? "text-emerald-600"
+                              : "text-brand-600"
+                          }`}
+                        >
+                          {goal.isCompleted
+                            ? "Selesai"
+                            : `${Math.round(
+                                percent
+                              )}%`}
+                        </span>
+
+                      </div>
+
+                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+
+                        <div
+                          className={`h-full rounded-full ${
+                            goal.isCompleted
+                              ? "bg-emerald-500"
+                              : "bg-brand-600"
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              percent,
+                              100
+                            )}%`,
+                          }}
+                        />
+
+                      </div>
+
+                      <div className="mt-2 flex justify-between text-xs text-slate-500">
+
+                        <span>
+                          Terkumpul{" "}
+                          {formatRupiah(
+                            current
+                          )}
+                        </span>
+
+                        <span>
+                          dari{" "}
+                          {formatRupiah(
+                            target
+                          )}
+                        </span>
+
+                      </div>
 
                     </div>
+                  );
+                }
+              )}
 
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+            </div>
+          )}
 
-                      <div
-                        className="h-full rounded-full bg-emerald-500 transition-all"
-                        style={{
-                          width: `${percent}%`,
-                        }}
-                      />
+        </div>
 
-                    </div>
+      </div>
 
-                    <div className="mt-2 flex justify-between text-xs text-slate-500">
+      {/* =====================================================
+          ALERTS / INSIGHTS
+      ===================================================== */}
 
-                      <span>
-                        Terkumpul{" "}
-                        {formatRupiah(saved)}
-                      </span>
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
 
-                      <span>
-                        dari{" "}
-                        {formatRupiah(target)}
-                      </span>
+        <div className="mb-5">
 
-                    </div>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Financial Insights
+          </h2>
 
-                  </div>
+          <p className="mt-1 text-sm text-slate-500">
+            Hal yang perlu diperhatikan dari kondisi keuangan saat ini.
+          </p>
 
-                );
+        </div>
 
-              })}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+
+          {/* CASHFLOW */}
+
+          <div
+            className={`rounded-2xl border p-4 ${
+              cashFlow >= 0
+                ? "border-emerald-100 bg-emerald-50"
+                : "border-red-100 bg-red-50"
+            }`}
+          >
+
+            <div className="flex gap-3">
+
+              {cashFlow >= 0 ? (
+                <CheckCircle2
+                  className="shrink-0 text-emerald-600"
+                  size={20}
+                />
+              ) : (
+                <AlertTriangle
+                  className="shrink-0 text-red-600"
+                  size={20}
+                />
+              )}
+
+              <div>
+
+                <p
+                  className={`text-sm font-semibold ${
+                    cashFlow >= 0
+                      ? "text-emerald-800"
+                      : "text-red-800"
+                  }`}
+                >
+                  Kondisi Cash Flow
+                </p>
+
+                <p
+                  className={`mt-1 text-xs ${
+                    cashFlow >= 0
+                      ? "text-emerald-700"
+                      : "text-red-700"
+                  }`}
+                >
+                  {cashFlow >= 0
+                    ? "Pemasukan masih lebih besar daripada pengeluaran."
+                    : "Pengeluaran periode ini lebih besar daripada pemasukan."}
+                </p>
+
+              </div>
 
             </div>
 
-          )}
+          </div>
+
+          {/* BUDGET */}
+
+          <div className="rounded-2xl border border-orange-100 bg-orange-50 p-4">
+
+            <div className="flex gap-3">
+
+              <AlertTriangle
+                className="shrink-0 text-orange-600"
+                size={20}
+              />
+
+              <div>
+
+                <p className="text-sm font-semibold text-orange-800">
+                  Budget Perlu Diperhatikan
+                </p>
+
+                <p className="mt-1 text-xs text-orange-700">
+
+                  {almostFinishedBudgets.length > 0
+                    ? `${almostFinishedBudgets.length} budget sudah mencapai 70% atau lebih.`
+                    : "Belum ada budget yang mendekati batas."}
+
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* GOAL */}
+
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+
+            <div className="flex gap-3">
+
+              <Target
+                className="shrink-0 text-blue-600"
+                size={20}
+              />
+
+              <div>
+
+                <p className="text-sm font-semibold text-blue-800">
+                  Target Tabungan
+                </p>
+
+                <p className="mt-1 text-xs text-blue-700">
+
+                  {nearestGoal
+                    ? `Target berikutnya: ${nearestGoal.name}.`
+                    : "Belum ada target tabungan aktif."}
+
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
 
         </div>
 
@@ -1399,14 +1742,14 @@ function KpiCard({
           </p>
 
           <h2 className="mt-2 truncate text-xl font-bold text-slate-900 sm:text-2xl">
-            {formatRupiah(value || 0)}
+            {formatRupiah(
+              Number(value || 0)
+            )}
           </h2>
 
-          {description && (
-            <p className="mt-2 text-xs text-slate-400">
-              {description}
-            </p>
-          )}
+          <p className="mt-2 text-xs text-slate-400">
+            {description}
+          </p>
 
         </div>
 
@@ -1426,8 +1769,54 @@ function KpiCard({
             ${color}
           `}
         >
-
           <Icon size={23} />
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+/* =========================================================
+   INSIGHT CARD
+========================================================= */
+
+function InsightCard({
+  icon: Icon,
+  title,
+  value,
+  description,
+  danger = false,
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+
+      <div className="flex items-start gap-3">
+
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+            danger
+              ? "bg-red-100 text-red-600"
+              : "bg-white text-brand-600"
+          }`}
+        >
+          <Icon size={17} />
+        </div>
+
+        <div className="min-w-0">
+
+          <p className="text-xs font-medium text-slate-500">
+            {title}
+          </p>
+
+          <p className="mt-1 truncate text-sm font-bold text-slate-900">
+            {value}
+          </p>
+
+          <p className="mt-1 text-xs text-slate-400">
+            {description}
+          </p>
 
         </div>
 
@@ -1465,9 +1854,7 @@ function StatisticCard({
       <div className="flex items-center gap-3">
 
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm">
-
           <Icon size={17} />
-
         </div>
 
         <p className="text-sm font-medium text-slate-600">
@@ -1485,6 +1872,164 @@ function StatisticCard({
 }
 
 /* =========================================================
+   CATEGORY CHART
+========================================================= */
+
+function CategoryChart({
+  title,
+  description,
+  data,
+  icon: Icon,
+  emptyText,
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+      <div className="mb-5 flex items-start justify-between">
+
+        <div>
+
+          <h2 className="text-lg font-semibold text-slate-900">
+            {title}
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500">
+            {description}
+          </p>
+
+        </div>
+
+        <Icon
+          size={20}
+          className="text-brand-600"
+        />
+
+      </div>
+
+      {data.length === 0 ? (
+        <EmptyState
+          icon={Icon}
+          text={emptyText}
+        />
+      ) : (
+
+        <div className="grid gap-5 md:grid-cols-2">
+
+          <div className="h-[280px]">
+
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+            >
+
+              <PieChart>
+
+                <Pie
+                  data={data}
+                  dataKey="total"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={62}
+                  outerRadius={100}
+                  paddingAngle={3}
+                >
+
+                  {data.map(
+                    (_, index) => (
+                      <Cell
+                        key={`chart-${index}`}
+                        fill={
+                          CHART_COLORS[
+                            index %
+                              CHART_COLORS.length
+                          ]
+                        }
+                      />
+                    )
+                  )}
+
+                </Pie>
+
+                <Tooltip
+                  formatter={(value) =>
+                    formatRupiah(value)
+                  }
+                />
+
+                <Legend
+                  verticalAlign="bottom"
+                  height={36}
+                  wrapperStyle={{
+                    fontSize: "12px",
+                  }}
+                />
+
+              </PieChart>
+
+            </ResponsiveContainer>
+
+          </div>
+
+          <div className="flex flex-col justify-center space-y-2">
+
+            {data
+              .slice(0, 6)
+              .map((item, index) => (
+
+                <div
+                  key={`${item.name}-${index}`}
+                  className="
+                    flex
+                    items-center
+                    justify-between
+                    rounded-2xl
+                    bg-slate-50
+                    px-4
+                    py-3
+                  "
+                >
+
+                  <div className="flex min-w-0 items-center gap-3">
+
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{
+                        backgroundColor:
+                          CHART_COLORS[
+                            index %
+                              CHART_COLORS.length
+                          ],
+                      }}
+                    />
+
+                    <span className="truncate text-sm font-medium text-slate-700">
+                      {item.name}
+                    </span>
+
+                  </div>
+
+                  <span className="ml-3 whitespace-nowrap text-sm font-semibold text-slate-900">
+                    {formatRupiah(
+                      item.total
+                    )}
+                  </span>
+
+                </div>
+
+              ))}
+
+          </div>
+
+        </div>
+
+      )}
+
+    </div>
+  );
+}
+
+/* =========================================================
    EMPTY STATE
 ========================================================= */
 
@@ -1496,9 +2041,7 @@ function EmptyState({
     <div className="flex h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
 
       <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-400 shadow-sm">
-
         <Icon size={21} />
-
       </div>
 
       <p className="text-sm text-slate-400">

@@ -1,915 +1,1994 @@
-const asyncHandler = require("express-async-handler");
-const prisma = require("../utils/prisma");
+const asyncHandler = require('express-async-handler');
+const prisma = require('../utils/prisma');
 
-// ===================================================
-// PERIOD
-// ===================================================
+/*
+|--------------------------------------------------------------------------
+| ROLE HELPERS
+|--------------------------------------------------------------------------
+*/
 
-function getPeriodRange(period) {
-  const now = new Date();
+const isOwnerOrAdmin = (membership) => {
+  return ['OWNER', 'ADMIN'].includes(
+    membership?.role
+  );
+};
 
-  let start;
-  let end;
+/*
+|--------------------------------------------------------------------------
+| ACCOUNT ACCESS HELPERS
+|--------------------------------------------------------------------------
+*/
 
-  switch (period) {
-    case "today":
-      start = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate()
-      );
-
-      end = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        23,
-        59,
-        59,
-        999
-      );
-      break;
-
-    case "this_week": {
-      const day = now.getDay() || 7;
-
-      start = new Date(now);
-      start.setDate(now.getDate() - day + 1);
-      start.setHours(0, 0, 0, 0);
-
-      end = new Date(now);
-      end.setHours(23, 59, 59, 999);
-      break;
-    }
-
-    case "last_month":
-      start = new Date(
-        now.getFullYear(),
-        now.getMonth() - 1,
-        1
-      );
-
-      end = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        0,
-        23,
-        59,
-        59,
-        999
-      );
-      break;
-
-    case "3_months":
-      start = new Date(
-        now.getFullYear(),
-        now.getMonth() - 2,
-        1
-      );
-
-      end = new Date(
-        now.getFullYear(),
-        now.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999
-      );
-      break;
-
-    case "this_year":
-      start = new Date(
-        now.getFullYear(),
-        0,
-        1
-      );
-
-      end = new Date(
-        now.getFullYear(),
-        11,
-        31,
-        23,
-        59,
-        59,
-        999
-      );
-      break;
-
-    default:
-      start = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        1
-      );
-
-      end = new Date(
-        now.getFullYear(),
-        now.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999
-      );
-  }
-
-  return {
-    start,
-    end,
-  };
-}
-
-// ===================================================
-// ACCOUNT FILTER
-// ===================================================
-
-async function getAllowedAccountFilter(req) {
-
-  if (
-    ["OWNER", "ADMIN"].includes(
-      req.membership.role
-    )
-  ) {
-    return {};
+/**
+ * Ambil ID rekening yang boleh dilihat user.
+ *
+ * OWNER / ADMIN
+ * -> boleh melihat semua rekening tenant.
+ *
+ * MEMBER
+ * -> hanya rekening yang memiliki AccountAccess
+ *    dengan canView = true.
+ */
+const getAllowedAccountIds = async (req) => {
+  if (isOwnerOrAdmin(req.membership)) {
+    return null;
   }
 
   const accesses =
     await prisma.accountAccess.findMany({
       where: {
         userId: req.user.id,
+
         canView: true,
+
+        account: {
+          tenantId: req.tenantId,
+
+          isActive: true,
+        },
       },
+
       select: {
         accountId: true,
       },
     });
 
+  return accesses.map(
+    (item) => item.accountId
+  );
+};
+
+/**
+ * Filter untuk Transaction.
+ *
+ * Transaction punya:
+ * accountId
+ */
+const getAllowedAccountFilter = async (req) => {
+  const accountIds =
+    await getAllowedAccountIds(req);
+
+  /*
+   * OWNER / ADMIN
+   * Tidak perlu filter account.
+   */
+  if (accountIds === null) {
+    return {};
+  }
+
+  /*
+   * MEMBER tanpa akses rekening.
+   *
+   * in: [] memastikan tidak mengambil
+   * transaksi milik rekening lain.
+   */
   return {
     accountId: {
-      in: accesses.map(
-        (a) => a.accountId
-      ),
+      in: accountIds,
     },
   };
-}
+};
 
-// ===================================================
-// GET DASHBOARD
-// ===================================================
+/**
+ * Filter untuk Account.
+ *
+ * Account punya:
+ * id
+ *
+ * JANGAN menggunakan accountId di sini.
+ */
+const getAllowedAccountWhere = async (req) => {
+  const accountIds =
+    await getAllowedAccountIds(req);
 
-const getDashboard =
-  asyncHandler(async (req, res) => {
+  /*
+   * OWNER / ADMIN
+   */
+  if (accountIds === null) {
+    return {};
+  }
 
-    const {
-      period,
-      startDate,
-      endDate,
-    } = req.query;
+  /*
+   * MEMBER
+   */
+  return {
+    id: {
+      in: accountIds,
+    },
+  };
+};
 
-    const { start, end } =
-      startDate && endDate
-        ? {
-            start: new Date(startDate),
-            end: new Date(endDate),
-          }
-        : getPeriodRange(period);
+/*
+|--------------------------------------------------------------------------
+| DATE FILTER
+|--------------------------------------------------------------------------
+*/
 
-    const accountFilter =
-      await getAllowedAccountFilter(req);
+const getDateFilter = (
+  startDate,
+  endDate
+) => {
+  const date = {};
 
-    const transactionWhere = {
-      tenantId: req.tenantId,
-      date: {
-        gte: start,
-        lte: end,
-      },
-      ...accountFilter,
-    };
+  if (startDate) {
+    const start = new Date(startDate);
 
-    const currentPeriod =
-      `${start.getFullYear()}-${String(
-        start.getMonth() + 1
-      ).padStart(2, "0")}`;
+    if (
+      Number.isNaN(
+        start.getTime()
+      )
+    ) {
+      throw new Error(
+        'startDate tidak valid.'
+      );
+    }
 
-    const [
-
-      accounts,
-
-      incomeAgg,
-
-      expenseAgg,
-
-      transactions,
-
-      transactionCount,
-
-      categoryCount,
-
-      budgets,
-
-      financialGoals,
-
-    ] = await Promise.all([
-
-      // ===========================
-      // Accounts
-      // ===========================
-
-      prisma.account.findMany({
-        where: {
-          tenantId: req.tenantId,
-          isActive: true,
-          ...accountFilter,
-        },
-        orderBy: {
-          name: "asc",
-        },
-      }),
-
-      // ===========================
-      // Income
-      // ===========================
-
-      prisma.transaction.aggregate({
-        where: {
-          ...transactionWhere,
-          type: "INCOME",
-        },
-        _sum: {
-          amount: true,
-        },
-      }),
-
-      // ===========================
-      // Expense
-      // ===========================
-
-      prisma.transaction.aggregate({
-        where: {
-          ...transactionWhere,
-          type: "EXPENSE",
-        },
-        _sum: {
-          amount: true,
-        },
-      }),
-
-      // ===========================
-      // Transactions
-      // ===========================
-
-      prisma.transaction.findMany({
-        where: transactionWhere,
-        include: {
-          category: true,
-          account: true,
-        },
-        orderBy: {
-          date: "desc",
-        },
-      }),
-
-      // ===========================
-      // Statistics
-      // ===========================
-
-      prisma.transaction.count({
-        where: transactionWhere,
-      }),
-
-      prisma.category.count({
-        where: {
-          tenantId: req.tenantId,
-          isActive: true,
-        },
-      }),
-
-      // ===========================
-      // Budget
-      // ===========================
-
-      prisma.budget.findMany({
-        where: {
-          tenantId: req.tenantId,
-          period: currentPeriod,
-        },
-        include: {
-          category: true,
-        },
-      }),
-
-      // ===========================
-      // Financial Goal
-      // ===========================
-
-      prisma.financialGoal.findMany({
-        where: {
-          tenantId: req.tenantId,
-        },
-        include: {
-          account: true,
-        },
-        orderBy: {
-          targetDate: "asc",
-        },
-      }),
-
-    ]);
-        // ===================================================
-    // KPI
-    // ===================================================
-
-    const totalSaldo = accounts.reduce(
-      (sum, account) =>
-        sum + Number(account.currentBalance),
+    start.setHours(
+      0,
+      0,
+      0,
       0
     );
 
-    const totalIncome = Number(
-      incomeAgg._sum.amount || 0
+    date.gte = start;
+  }
+
+  if (endDate) {
+    const end = new Date(endDate);
+
+    if (
+      Number.isNaN(
+        end.getTime()
+      )
+    ) {
+      throw new Error(
+        'endDate tidak valid.'
+      );
+    }
+
+    end.setHours(
+      23,
+      59,
+      59,
+      999
     );
 
-    const totalExpense = Number(
-      expenseAgg._sum.amount || 0
-    );
+    date.lte = end;
+  }
 
-    const cashFlow =
-      totalIncome - totalExpense;
+  return Object.keys(date).length > 0
+    ? { date }
+    : {};
+};
 
-    // ===================================================
-    // EXPENSE BY CATEGORY
-    // ===================================================
+/*
+|--------------------------------------------------------------------------
+| PERIOD FILTER
+|--------------------------------------------------------------------------
+*/
 
-    const expenseCategoryMap = {};
+const getPeriodFilter = (
+  period
+) => {
+  const now = new Date();
 
-    transactions.forEach((trx) => {
+  let start;
+  let end;
 
-      if (trx.type !== "EXPENSE") return;
+  switch (period) {
+    /*
+    |--------------------------------------------------------------------------
+    | TODAY
+    |--------------------------------------------------------------------------
+    */
 
-      const name =
-        trx.category?.name ||
-        "Lainnya";
+    case 'today': {
+      start = new Date(now);
 
-      expenseCategoryMap[name] =
-        (expenseCategoryMap[name] || 0) +
-        Number(trx.amount);
-
-    });
-
-    const expenseByCategory =
-      Object.entries(
-        expenseCategoryMap
-      ).map(([name, value]) => ({
-        name,
-        value,
-      }));
-
-    // ===================================================
-    // EXPENSE BY ACCOUNT
-    // ===================================================
-
-    const expenseAccountMap = {};
-
-    transactions.forEach((trx) => {
-
-      if (trx.type !== "EXPENSE") return;
-
-      const name =
-        trx.account?.name || "-";
-
-      expenseAccountMap[name] =
-        (expenseAccountMap[name] || 0) +
-        Number(trx.amount);
-
-    });
-
-    const expenseByAccount =
-      Object.entries(
-        expenseAccountMap
-      ).map(([name, value]) => ({
-        name,
-        value,
-      }));
-
-    // ===================================================
-    // RECENT TRANSACTION
-    // ===================================================
-
-    const recentTransactions =
-      transactions
-        .slice(0, 8)
-        .map((trx) => ({
-
-          id: trx.id,
-
-          description:
-            trx.note ||
-            trx.category?.name ||
-            trx.account?.name ||
-            "-",
-
-          amount: Number(trx.amount),
-
-          type: trx.type,
-
-          category:
-            trx.category?.name || "-",
-
-          account:
-            trx.account?.name || "-",
-
-          date: trx.date.toLocaleDateString(
-            "id-ID"
-          ),
-
-        }));
-
-    // ===================================================
-    // BUDGET PROGRESS
-    // ===================================================
-
-    const budgetData =
-      budgets.map((budget) => {
-
-        const used =
-          transactions
-            .filter(
-              (trx) =>
-                trx.type ===
-                  "EXPENSE" &&
-                trx.categoryId ===
-                  budget.categoryId
-            )
-            .reduce(
-              (sum, trx) =>
-                sum +
-                Number(trx.amount),
-              0
-            );
-
-        const limit =
-          Number(budget.amount);
-
-        return {
-
-          id: budget.id,
-
-          name:
-            budget.category?.name ||
-            "Tanpa Kategori",
-
-          categoryId:
-            budget.categoryId,
-
-          period:
-            budget.period,
-
-          limit,
-
-          used,
-
-          remaining:
-            limit - used,
-
-          percentage:
-            limit > 0
-              ? Math.min(
-                  100,
-                  (used / limit) *
-                    100
-                )
-              : 0,
-
-        };
-
-      });
-
-    // ===================================================
-    // FINANCIAL GOALS
-    // ===================================================
-
-    const savingGoalData =
-      financialGoals.map(
-        (goal) => {
-
-          const target =
-            Number(
-              goal.targetAmount
-            );
-
-          const saved =
-            Number(
-              goal.currentAmount
-            );
-
-          return {
-
-            id: goal.id,
-
-            name: goal.name,
-
-            account:
-              goal.account?.name ||
-              "-",
-
-            target,
-
-            initial:
-              Number(
-                goal.initialAmount
-              ),
-
-            saved,
-
-            remaining:
-              Math.max(
-                0,
-                target - saved
-              ),
-
-            percentage:
-              target > 0
-                ? Math.min(
-                    100,
-                    (saved /
-                      target) *
-                      100
-                  )
-                : 0,
-
-            targetDate:
-              goal.targetDate,
-
-            description:
-              goal.description,
-
-          };
-
-        }
+      start.setHours(
+        0,
+        0,
+        0,
+        0
       );
 
-    // ===================================================
-    // STATISTICS
-    // ===================================================
-
-    const statistics = {
-
-      categoryCount,
-
-      transactionCount,
-
-      budgetCount:
-        budgets.length,
-
-      accountCount:
-        accounts.length,
-
-      goalCount:
-        financialGoals.length,
-
-    };
-        // ===================================================
-    // RESPONSE
-    // ===================================================
-
-    res.json({
-
-      period: {
-        start,
-        end,
-      },
-
-      totalSaldo,
-
-      totalIncome,
-
-      totalExpense,
-
-      cashFlow,
-
-      accounts: accounts.map((account) => ({
-        id: account.id,
-        name: account.name,
-        type: account.type,
-        balance: Number(account.currentBalance),
-      })),
-
-      expenseByCategory,
-
-      expenseByAccount,
-
-      recentTransactions,
-
-      budgets: budgetData,
-
-      savingGoals: savingGoalData,
-
-      statistics,
-
-    });
-
-});
-
-// =======================================================
-// REPORT INCOME
-// =======================================================
-
-const reportIncome = asyncHandler(async (req, res) => {
-
-  const {
-    startDate,
-    endDate,
-    categoryId,
-    accountId,
-  } = req.query;
-
-  const accountFilter =
-    await getAllowedAccountFilter(req);
-
-  const items =
-    await prisma.transaction.findMany({
-
-      where: {
-
-        tenantId: req.tenantId,
-
-        type: "INCOME",
-
-        ...(startDate &&
-          endDate && {
-            date: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
-            },
-          }),
-
-        ...(categoryId && {
-          categoryId,
-        }),
-
-        ...(accountId
-          ? { accountId }
-          : accountFilter),
-
-      },
-
-      include: {
-        category: true,
-        account: true,
-      },
-
-      orderBy: {
-        date: "desc",
-      },
-
-    });
-
-  const total =
-    items.reduce(
-      (sum, trx) =>
-        sum + Number(trx.amount),
-      0
-    );
-
-  res.json({
-    total,
-    count: items.length,
-    items,
-  });
-
-});
-
-// =======================================================
-// REPORT EXPENSE
-// =======================================================
-
-const reportExpense = asyncHandler(async (req, res) => {
-
-  const {
-    startDate,
-    endDate,
-    categoryId,
-    accountId,
-  } = req.query;
-
-  const accountFilter =
-    await getAllowedAccountFilter(req);
-
-  const items =
-    await prisma.transaction.findMany({
-
-      where: {
-
-        tenantId: req.tenantId,
-
-        type: "EXPENSE",
-
-        ...(startDate &&
-          endDate && {
-            date: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
-            },
-          }),
-
-        ...(categoryId && {
-          categoryId,
-        }),
-
-        ...(accountId
-          ? { accountId }
-          : accountFilter),
-
-      },
-
-      include: {
-        category: true,
-        account: true,
-      },
-
-      orderBy: {
-        date: "desc",
-      },
-
-    });
-
-  const total =
-    items.reduce(
-      (sum, trx) =>
-        sum + Number(trx.amount),
-      0
-    );
-
-  res.json({
-    total,
-    count: items.length,
-    items,
-  });
-
-});
-
-// =======================================================
-// CASHFLOW
-// =======================================================
-
-const reportCashflow = asyncHandler(async (req, res) => {
-
-  const {
-    startDate,
-    endDate,
-  } = req.query;
-
-  const accountFilter =
-    await getAllowedAccountFilter(req);
-
-  const where = {
-
-    tenantId: req.tenantId,
-
-    ...(startDate &&
-      endDate && {
-        date: {
-          gte: new Date(startDate),
-          lte: new Date(endDate),
-        },
-      }),
-
-    ...accountFilter,
-
+      end = new Date(now);
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      break;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | THIS WEEK
+    |--------------------------------------------------------------------------
+    */
+
+    case 'this_week': {
+      start = new Date(now);
+
+      const day =
+        start.getDay();
+
+      /*
+       * Sunday = 0
+       * Monday = 1
+       */
+
+      const diff =
+        day === 0
+          ? 6
+          : day - 1;
+
+      start.setDate(
+        start.getDate() - diff
+      );
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      end = new Date(now);
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      break;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | THIS MONTH
+    |--------------------------------------------------------------------------
+    */
+
+    case 'this_month': {
+      start = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1
+      );
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      end = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0
+      );
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      break;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | LAST MONTH
+    |--------------------------------------------------------------------------
+    */
+
+    case 'last_month': {
+      start = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        1
+      );
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      end = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0
+      );
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      break;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 3 MONTHS
+    |--------------------------------------------------------------------------
+    */
+
+    case '3_months': {
+      start = new Date(
+        now.getFullYear(),
+        now.getMonth() - 2,
+        1
+      );
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      end = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0
+      );
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      break;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | THIS YEAR
+    |--------------------------------------------------------------------------
+    */
+
+    case 'this_year': {
+      start = new Date(
+        now.getFullYear(),
+        0,
+        1
+      );
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      end = new Date(
+        now.getFullYear(),
+        11,
+        31
+      );
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      break;
+    }
+
+    default:
+      return {};
+  }
+
+  return {
+    date: {
+      gte: start,
+      lte: end,
+    },
   };
+};
 
-  const [
-    income,
-    expense,
-  ] = await Promise.all([
+/*
+|--------------------------------------------------------------------------
+| GET DASHBOARD
+|--------------------------------------------------------------------------
+| GET /api/dashboard
+|--------------------------------------------------------------------------
+*/
 
-    prisma.transaction.aggregate({
-      where: {
-        ...where,
-        type: "INCOME",
-      },
-      _sum: {
-        amount: true,
-      },
-    }),
+const getDashboard =
+  asyncHandler(
+    async (req, res) => {
+      const tenantId =
+        req.tenantId;
 
-    prisma.transaction.aggregate({
-      where: {
-        ...where,
-        type: "EXPENSE",
-      },
-      _sum: {
-        amount: true,
-      },
-    }),
+      if (!tenantId) {
+        return res.status(400).json({
+          message:
+            'Tenant tidak ditemukan.',
+        });
+      }
 
-  ]);
+      if (!req.user) {
+        return res.status(401).json({
+          message:
+            'User tidak terautentikasi.',
+        });
+      }
 
-  const totalIncome =
-    Number(
-      income._sum.amount || 0
-    );
+      const {
+        startDate,
+        endDate,
+        period = 'this_month',
+      } = req.query;
 
-  const totalExpense =
-    Number(
-      expense._sum.amount || 0
-    );
+      /*
+      |--------------------------------------------------------------------------
+      | DATE FILTER
+      |--------------------------------------------------------------------------
+      */
 
-  res.json({
+      let dateFilter;
 
-    totalIncome,
+      try {
+        if (
+          startDate ||
+          endDate
+        ) {
+          dateFilter =
+            getDateFilter(
+              startDate,
+              endDate
+            );
+        } else {
+          dateFilter =
+            getPeriodFilter(
+              period
+            );
+        }
+      } catch (error) {
+        return res.status(400).json({
+          message:
+            error.message,
+        });
+      }
 
-    totalExpense,
+      /*
+      |--------------------------------------------------------------------------
+      | ACCOUNT ACCESS
+      |--------------------------------------------------------------------------
+      */
 
-    netCashFlow:
-      totalIncome -
-      totalExpense,
+      const accountFilter =
+        await getAllowedAccountFilter(
+          req
+        );
 
-  });
+      const accountWhere =
+        await getAllowedAccountWhere(
+          req
+        );
 
-});
+      /*
+      |--------------------------------------------------------------------------
+      | TRANSACTION WHERE
+      |--------------------------------------------------------------------------
+      */
 
-// =======================================================
-// TOP EXPENSE CATEGORY
-// =======================================================
-
-const reportTopExpenseCategory = asyncHandler(async (req, res) => {
-
-  const {
-    startDate,
-    endDate,
-    limit = 5,
-  } = req.query;
-
-  const accountFilter =
-    await getAllowedAccountFilter(req);
-
-  const items =
-    await prisma.transaction.findMany({
-
-      where: {
-
-        tenantId: req.tenantId,
-
-        type: "EXPENSE",
-
-        ...(startDate &&
-          endDate && {
-            date: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
-            },
-          }),
+      const transactionWhere = {
+        tenantId,
 
         ...accountFilter,
 
-      },
+        ...dateFilter,
+      };
 
-      include: {
-        category: true,
-      },
+      /*
+      |--------------------------------------------------------------------------
+      | MAIN QUERIES
+      |--------------------------------------------------------------------------
+      */
 
-    });
+      const [
+        incomeResult,
+        expenseResult,
+        transactionCount,
+        accounts,
+        recentTransactions,
+        categoriesExpense,
+        categoriesIncome,
+        expenseByAccountGrouped,
+        budgets,
+        goals,
+        categoryCount,
+        budgetCount,
+      ] =
+        await Promise.all([
+          /*
+          |--------------------------------------------------------------------------
+          | INCOME
+          |--------------------------------------------------------------------------
+          */
 
-  const grouped = {};
+          prisma.transaction.aggregate({
+            where: {
+              ...transactionWhere,
 
-  items.forEach((trx) => {
+              type: 'INCOME',
+            },
 
-    const name =
-      trx.category?.name ||
-      "Lainnya";
+            _sum: {
+              amount: true,
+            },
+          }),
 
-    grouped[name] =
-      (grouped[name] || 0) +
-      Number(trx.amount);
+          /*
+          |--------------------------------------------------------------------------
+          | EXPENSE
+          |--------------------------------------------------------------------------
+          */
 
-  });
+          prisma.transaction.aggregate({
+            where: {
+              ...transactionWhere,
 
-  const result =
-    Object.entries(grouped)
-      .map(([name, total]) => ({
-        name,
-        total,
-      }))
-      .sort(
-        (a, b) =>
-          b.total - a.total
-      )
-      .slice(
-        0,
-        Number(limit)
-      );
+              type: 'EXPENSE',
+            },
 
-  res.json(result);
+            _sum: {
+              amount: true,
+            },
+          }),
 
-});
+          /*
+          |--------------------------------------------------------------------------
+          | TRANSACTION COUNT
+          |--------------------------------------------------------------------------
+          */
 
-// =======================================================
+          prisma.transaction.count({
+            where:
+              transactionWhere,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | ACCOUNTS
+          |--------------------------------------------------------------------------
+          |
+          | IMPORTANT:
+          |
+          | MEMBER:
+          |   id IN allowedAccountIds
+          |
+          | OWNER / ADMIN:
+          |   tidak ada filter id
+          |
+          */
+
+          prisma.account.findMany({
+            where: {
+              tenantId,
+
+              isActive: true,
+
+              ...accountWhere,
+            },
+
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              currentBalance: true,
+            },
+
+            orderBy: {
+              name: 'asc',
+            },
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | RECENT TRANSACTIONS
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.transaction.findMany({
+            where:
+              transactionWhere,
+
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                },
+              },
+
+              account: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                },
+              },
+
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+
+            orderBy: {
+              date: 'desc',
+            },
+
+            take: 10,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | EXPENSE BY CATEGORY
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.transaction.groupBy({
+            by: [
+              'categoryId',
+            ],
+
+            where: {
+              ...transactionWhere,
+
+              type: 'EXPENSE',
+
+              categoryId: {
+                not: null,
+              },
+            },
+
+            _sum: {
+              amount: true,
+            },
+
+            orderBy: {
+              _sum: {
+                amount: 'desc',
+              },
+            },
+
+            take: 10,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | INCOME BY CATEGORY
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.transaction.groupBy({
+            by: [
+              'categoryId',
+            ],
+
+            where: {
+              ...transactionWhere,
+
+              type: 'INCOME',
+
+              categoryId: {
+                not: null,
+              },
+            },
+
+            _sum: {
+              amount: true,
+            },
+
+            orderBy: {
+              _sum: {
+                amount: 'desc',
+              },
+            },
+
+            take: 10,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | EXPENSE BY ACCOUNT
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.transaction.groupBy({
+            by: [
+              'accountId',
+            ],
+
+            where: {
+              ...transactionWhere,
+
+              type: 'EXPENSE',
+            },
+
+            _sum: {
+              amount: true,
+            },
+
+            orderBy: {
+              _sum: {
+                amount: 'desc',
+              },
+            },
+
+            take: 10,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | BUDGET
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.budget.findMany({
+            where: {
+              tenantId,
+            },
+
+            include: {
+              category: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+
+            orderBy: {
+              period: 'desc',
+            },
+
+            take: 20,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | FINANCIAL GOALS
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.financialGoal.findMany({
+            where: {
+              tenantId,
+
+              ...(isOwnerOrAdmin(
+                req.membership
+              )
+                ? {}
+                : {
+                    account: {
+                      accesses: {
+                        some: {
+                          userId:
+                            req.user.id,
+
+                          canView:
+                            true,
+                        },
+                      },
+                    },
+                  }),
+            },
+
+            include: {
+              account: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+
+            orderBy: {
+              targetDate: 'asc',
+            },
+
+            take: 20,
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | CATEGORY COUNT
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.category.count({
+            where: {
+              tenantId,
+
+              isActive: true,
+            },
+          }),
+
+          /*
+          |--------------------------------------------------------------------------
+          | BUDGET COUNT
+          |--------------------------------------------------------------------------
+          */
+
+          prisma.budget.count({
+            where: {
+              tenantId,
+            },
+          }),
+        ]);
+
+      /*
+      |--------------------------------------------------------------------------
+      | TOTAL
+      |--------------------------------------------------------------------------
+      */
+
+      const totalIncome =
+        Number(
+          incomeResult._sum
+            .amount || 0
+        );
+
+      const totalExpense =
+        Number(
+          expenseResult._sum
+            .amount || 0
+        );
+
+      const cashFlow =
+        totalIncome -
+        totalExpense;
+
+      /*
+      |--------------------------------------------------------------------------
+      | CATEGORY DATA
+      |--------------------------------------------------------------------------
+      */
+
+      const categoryIds = [
+        ...categoriesExpense.map(
+          (item) =>
+            item.categoryId
+        ),
+
+        ...categoriesIncome.map(
+          (item) =>
+            item.categoryId
+        ),
+      ].filter(Boolean);
+
+      const categoryData =
+        categoryIds.length > 0
+          ? await prisma.category.findMany(
+              {
+                where: {
+                  tenantId,
+
+                  id: {
+                    in: [
+                      ...new Set(
+                        categoryIds
+                      ),
+                    ],
+                  },
+                },
+
+                select: {
+                  id: true,
+                  name: true,
+                },
+              }
+            )
+          : [];
+
+      const categoryMap =
+        new Map(
+          categoryData.map(
+            (category) => [
+              category.id,
+              category.name,
+            ]
+          )
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | EXPENSE BY CATEGORY
+      |--------------------------------------------------------------------------
+      */
+
+      const expenseByCategory =
+        categoriesExpense.map(
+          (item) => ({
+            categoryId:
+              item.categoryId,
+
+            categoryName:
+              categoryMap.get(
+                item.categoryId
+              ) ||
+              'Tanpa Kategori',
+
+            amount: Number(
+              item._sum.amount ||
+                0
+            ),
+          })
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | INCOME BY CATEGORY
+      |--------------------------------------------------------------------------
+      */
+
+      const incomeByCategory =
+        categoriesIncome.map(
+          (item) => ({
+            categoryId:
+              item.categoryId,
+
+            categoryName:
+              categoryMap.get(
+                item.categoryId
+              ) ||
+              'Tanpa Kategori',
+
+            amount: Number(
+              item._sum.amount ||
+                0
+            ),
+          })
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | ACCOUNT SUMMARY
+      |--------------------------------------------------------------------------
+      */
+
+      const accountSummary =
+        accounts.map(
+          (account) => ({
+            id: account.id,
+
+            name: account.name,
+
+            type: account.type,
+
+            balance: Number(
+              account.currentBalance ||
+                0
+            ),
+          })
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | TOTAL ACCOUNT BALANCE
+      |--------------------------------------------------------------------------
+      */
+
+      const totalAccountBalance =
+        accountSummary.reduce(
+          (
+            total,
+            account
+          ) =>
+            total +
+            account.balance,
+          0
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | EXPENSE BY ACCOUNT
+      |--------------------------------------------------------------------------
+      */
+
+      const expenseAccountIds =
+        expenseByAccountGrouped
+          .map(
+            (item) =>
+              item.accountId
+          )
+          .filter(Boolean);
+
+      const expenseAccounts =
+        expenseAccountIds.length >
+        0
+          ? await prisma.account.findMany(
+              {
+                where: {
+                  tenantId,
+
+                  isActive: true,
+
+                  id: {
+                    in: [
+                      ...new Set(
+                        expenseAccountIds
+                      ),
+                    ],
+                  },
+
+                  /*
+                   * Extra safety untuk MEMBER.
+                   */
+                  ...accountWhere,
+                },
+
+                select: {
+                  id: true,
+                  name: true,
+                },
+              }
+            )
+          : [];
+
+      const expenseAccountMap =
+        new Map(
+          expenseAccounts.map(
+            (account) => [
+              account.id,
+              account.name,
+            ]
+          )
+        );
+
+      const expenseByAccount =
+        expenseByAccountGrouped.map(
+          (item) => ({
+            accountId:
+              item.accountId,
+
+            accountName:
+              expenseAccountMap.get(
+                item.accountId
+              ) ||
+              'Rekening',
+
+            amount: Number(
+              item._sum.amount ||
+                0
+            ),
+          })
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | BUDGET
+      |--------------------------------------------------------------------------
+      */
+
+      const enrichedBudgets =
+        await Promise.all(
+          budgets.map(
+            async (budget) => {
+              const [
+                year,
+                month,
+              ] =
+                budget.period
+                  .split('-')
+                  .map(Number);
+
+              const start =
+                new Date(
+                  year,
+                  month - 1,
+                  1
+                );
+
+              start.setHours(
+                0,
+                0,
+                0,
+                0
+              );
+
+              const end =
+                new Date(
+                  year,
+                  month,
+                  0
+                );
+
+              end.setHours(
+                23,
+                59,
+                59,
+                999
+              );
+
+              const usedResult =
+                await prisma.transaction.aggregate(
+                  {
+                    where: {
+                      tenantId,
+
+                      type: 'EXPENSE',
+
+                      categoryId:
+                        budget.categoryId,
+
+                      date: {
+                        gte: start,
+                        lte: end,
+                      },
+
+                      ...accountFilter,
+                    },
+
+                    _sum: {
+                      amount: true,
+                    },
+                  }
+                );
+
+              const amount =
+                Number(
+                  budget.amount ||
+                    0
+                );
+
+              const used =
+                Number(
+                  usedResult
+                    ._sum
+                    .amount ||
+                    0
+                );
+
+              const remaining =
+                amount - used;
+
+              const percentage =
+                amount > 0
+                  ? (used /
+                      amount) *
+                    100
+                  : 0;
+
+              let status =
+                'AMAN';
+
+              if (
+                percentage > 100
+              ) {
+                status =
+                  'MELEBIHI_BUDGET';
+              } else if (
+                percentage >=
+                90
+              ) {
+                status =
+                  'HAMPIR_HABIS';
+              } else if (
+                percentage >=
+                70
+              ) {
+                status =
+                  'PERHATIAN';
+              }
+
+              return {
+                id: budget.id,
+
+                period:
+                  budget.period,
+
+                categoryId:
+                  budget.categoryId,
+
+                categoryName:
+                  budget.category
+                    ?.name ||
+                  '-',
+
+                name:
+                  budget.category
+                    ?.name ||
+                  'Budget',
+
+                amount,
+
+                limit: amount,
+
+                used,
+
+                remaining,
+
+                percentage:
+                  Math.round(
+                    percentage *
+                      100
+                  ) / 100,
+
+                status,
+              };
+            }
+          )
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | FINANCIAL GOALS
+      |--------------------------------------------------------------------------
+      */
+
+      const enrichedGoals =
+        goals.map(
+          (goal) => {
+            const targetAmount =
+              Number(
+                goal.targetAmount ||
+                  0
+              );
+
+            const currentAmount =
+              Number(
+                goal.currentAmount ||
+                  0
+              );
+
+            const progress =
+              targetAmount > 0
+                ? (currentAmount /
+                    targetAmount) *
+                  100
+                : 0;
+
+            return {
+              id: goal.id,
+
+              name: goal.name,
+
+              targetAmount,
+
+              target:
+                targetAmount,
+
+              currentAmount,
+
+              saved:
+                currentAmount,
+
+              progressPercentage:
+                Math.round(
+                  progress *
+                    100
+                ) / 100,
+
+              shortfall:
+                Math.max(
+                  targetAmount -
+                    currentAmount,
+                  0
+                ),
+
+              isCompleted:
+                currentAmount >=
+                targetAmount,
+
+              targetDate:
+                goal.targetDate,
+
+              account:
+                goal.account
+                  ? {
+                      id:
+                        goal.account
+                          .id,
+
+                      name:
+                        goal.account
+                          .name,
+                    }
+                  : null,
+            };
+          }
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | RECENT TRANSACTIONS
+      |--------------------------------------------------------------------------
+      */
+
+      const formattedRecentTransactions =
+        recentTransactions.map(
+          (transaction) => ({
+            id:
+              transaction.id,
+
+            date:
+              transaction.date,
+
+            type:
+              transaction.type,
+
+            amount: Number(
+              transaction.amount ||
+                0
+            ),
+
+            note:
+              transaction.note ||
+              '',
+
+            description:
+              transaction.note ||
+              '',
+
+            category:
+              transaction.category
+                ? {
+                    id:
+                      transaction
+                        .category
+                        .id,
+
+                    name:
+                      transaction
+                        .category
+                        .name,
+
+                    type:
+                      transaction
+                        .category
+                        .type,
+                  }
+                : null,
+
+            account:
+              transaction.account
+                ? {
+                    id:
+                      transaction
+                        .account
+                        .id,
+
+                    name:
+                      transaction
+                        .account
+                        .name,
+
+                    type:
+                      transaction
+                        .account
+                        .type,
+                  }
+                : null,
+
+            user:
+              transaction.user
+                ? {
+                    id:
+                      transaction
+                        .user
+                        .id,
+
+                    name:
+                      transaction
+                        .user
+                        .name,
+                  }
+                : null,
+          })
+        );
+
+      /*
+      |--------------------------------------------------------------------------
+      | RESPONSE
+      |--------------------------------------------------------------------------
+      */
+
+      res.json({
+        /*
+        |--------------------------------------------------------------------------
+        | KPI
+        |--------------------------------------------------------------------------
+        */
+
+        totalSaldo:
+          totalAccountBalance,
+
+        totalIncome,
+
+        totalExpense,
+
+        cashFlow,
+
+        /*
+        |--------------------------------------------------------------------------
+        | SUMMARY
+        |--------------------------------------------------------------------------
+        */
+
+        summary: {
+          totalIncome,
+
+          totalExpense,
+
+          balance:
+            cashFlow,
+
+          cashFlow,
+
+          transactionCount,
+
+          totalAccountBalance,
+
+          accountCount:
+            accounts.length,
+        },
+
+        /*
+        |--------------------------------------------------------------------------
+        | ACCOUNTS
+        |--------------------------------------------------------------------------
+        */
+
+        accounts:
+          accountSummary,
+
+        /*
+        |--------------------------------------------------------------------------
+        | RECENT TRANSACTIONS
+        |--------------------------------------------------------------------------
+        */
+
+        recentTransactions:
+          formattedRecentTransactions,
+
+        /*
+        |--------------------------------------------------------------------------
+        | CHART
+        |--------------------------------------------------------------------------
+        */
+
+        expenseByCategory,
+
+        incomeByCategory,
+
+        expenseByAccount,
+
+        /*
+        |--------------------------------------------------------------------------
+        | BUDGET
+        |--------------------------------------------------------------------------
+        */
+
+        budgets:
+          enrichedBudgets,
+
+        /*
+        |--------------------------------------------------------------------------
+        | GOALS
+        |--------------------------------------------------------------------------
+        */
+
+        savingGoals:
+          enrichedGoals,
+
+        goals:
+          enrichedGoals,
+
+        /*
+        |--------------------------------------------------------------------------
+        | STATISTICS
+        |--------------------------------------------------------------------------
+        */
+
+        statistics: {
+          categoryCount,
+
+          transactionCount,
+
+          budgetCount,
+        },
+
+        /*
+        |--------------------------------------------------------------------------
+        | FILTERS
+        |--------------------------------------------------------------------------
+        */
+
+        filters: {
+          period,
+
+          startDate:
+            startDate || null,
+
+          endDate:
+            endDate || null,
+        },
+      });
+    }
+  );
+
+/*
+|--------------------------------------------------------------------------
+| REPORT - INCOME
+|--------------------------------------------------------------------------
+| GET /api/reports/income
+|--------------------------------------------------------------------------
+*/
+
+const reportIncome =
+  asyncHandler(
+    async (req, res) => {
+      const tenantId =
+        req.tenantId;
+
+      const {
+        startDate,
+        endDate,
+      } = req.query;
+
+      let dateFilter;
+
+      try {
+        dateFilter =
+          getDateFilter(
+            startDate,
+            endDate
+          );
+      } catch (error) {
+        return res.status(400).json({
+          message:
+            error.message,
+        });
+      }
+
+      const accountFilter =
+        await getAllowedAccountFilter(
+          req
+        );
+
+      const result =
+        await prisma.transaction.aggregate(
+          {
+            where: {
+              tenantId,
+
+              type: 'INCOME',
+
+              ...accountFilter,
+
+              ...dateFilter,
+            },
+
+            _sum: {
+              amount: true,
+            },
+
+            _count: {
+              id: true,
+            },
+          }
+        );
+
+      res.json({
+        type: 'INCOME',
+
+        total: Number(
+          result._sum.amount ||
+            0
+        ),
+
+        transactionCount:
+          result._count.id,
+
+        filters: {
+          startDate:
+            startDate || null,
+
+          endDate:
+            endDate || null,
+        },
+      });
+    }
+  );
+
+/*
+|--------------------------------------------------------------------------
+| REPORT - EXPENSE
+|--------------------------------------------------------------------------
+| GET /api/reports/expense
+|--------------------------------------------------------------------------
+*/
+
+const reportExpense =
+  asyncHandler(
+    async (req, res) => {
+      const tenantId =
+        req.tenantId;
+
+      const {
+        startDate,
+        endDate,
+      } = req.query;
+
+      let dateFilter;
+
+      try {
+        dateFilter =
+          getDateFilter(
+            startDate,
+            endDate
+          );
+      } catch (error) {
+        return res.status(400).json({
+          message:
+            error.message,
+        });
+      }
+
+      const accountFilter =
+        await getAllowedAccountFilter(
+          req
+        );
+
+      const result =
+        await prisma.transaction.aggregate(
+          {
+            where: {
+              tenantId,
+
+              type: 'EXPENSE',
+
+              ...accountFilter,
+
+              ...dateFilter,
+            },
+
+            _sum: {
+              amount: true,
+            },
+
+            _count: {
+              id: true,
+            },
+          }
+        );
+
+      res.json({
+        type: 'EXPENSE',
+
+        total: Number(
+          result._sum.amount ||
+            0
+        ),
+
+        transactionCount:
+          result._count.id,
+
+        filters: {
+          startDate:
+            startDate || null,
+
+          endDate:
+            endDate || null,
+        },
+      });
+    }
+  );
+
+/*
+|--------------------------------------------------------------------------
+| REPORT - CASHFLOW
+|--------------------------------------------------------------------------
+| GET /api/reports/cashflow
+|--------------------------------------------------------------------------
+*/
+
+const reportCashflow =
+  asyncHandler(
+    async (req, res) => {
+      const tenantId =
+        req.tenantId;
+
+      const {
+        startDate,
+        endDate,
+      } = req.query;
+
+      let dateFilter;
+
+      try {
+        dateFilter =
+          getDateFilter(
+            startDate,
+            endDate
+          );
+      } catch (error) {
+        return res.status(400).json({
+          message:
+            error.message,
+        });
+      }
+
+      const accountFilter =
+        await getAllowedAccountFilter(
+          req
+        );
+
+      const [
+        income,
+        expense,
+      ] =
+        await Promise.all([
+          prisma.transaction.aggregate(
+            {
+              where: {
+                tenantId,
+
+                type: 'INCOME',
+
+                ...accountFilter,
+
+                ...dateFilter,
+              },
+
+              _sum: {
+                amount: true,
+              },
+            }
+          ),
+
+          prisma.transaction.aggregate(
+            {
+              where: {
+                tenantId,
+
+                type: 'EXPENSE',
+
+                ...accountFilter,
+
+                ...dateFilter,
+              },
+
+              _sum: {
+                amount: true,
+              },
+            }
+          ),
+        ]);
+
+      const totalIncome =
+        Number(
+          income._sum.amount ||
+            0
+        );
+
+      const totalExpense =
+        Number(
+          expense._sum.amount ||
+            0
+        );
+
+      res.json({
+        totalIncome,
+
+        totalExpense,
+
+        cashflow:
+          totalIncome -
+          totalExpense,
+
+        filters: {
+          startDate:
+            startDate || null,
+
+          endDate:
+            endDate || null,
+        },
+      });
+    }
+  );
+
+/*
+|--------------------------------------------------------------------------
+| REPORT - TOP EXPENSE CATEGORY
+|--------------------------------------------------------------------------
+| GET /api/reports/top-expense-category
+|--------------------------------------------------------------------------
+*/
+
+const reportTopExpenseCategory =
+  asyncHandler(
+    async (req, res) => {
+      const tenantId =
+        req.tenantId;
+
+      const {
+        startDate,
+        endDate,
+      } = req.query;
+
+      let dateFilter;
+
+      try {
+        dateFilter =
+          getDateFilter(
+            startDate,
+            endDate
+          );
+      } catch (error) {
+        return res.status(400).json({
+          message:
+            error.message,
+        });
+      }
+
+      const accountFilter =
+        await getAllowedAccountFilter(
+          req
+        );
+
+      const grouped =
+        await prisma.transaction.groupBy(
+          {
+            by: [
+              'categoryId',
+            ],
+
+            where: {
+              tenantId,
+
+              type: 'EXPENSE',
+
+              categoryId: {
+                not: null,
+              },
+
+              ...accountFilter,
+
+              ...dateFilter,
+            },
+
+            _sum: {
+              amount: true,
+            },
+
+            orderBy: {
+              _sum: {
+                amount: 'desc',
+              },
+            },
+
+            take: 10,
+          }
+        );
+
+      const categoryIds =
+        grouped
+          .map(
+            (item) =>
+              item.categoryId
+          )
+          .filter(Boolean);
+
+      const categories =
+        categoryIds.length > 0
+          ? await prisma.category.findMany(
+              {
+                where: {
+                  tenantId,
+
+                  id: {
+                    in: categoryIds,
+                  },
+                },
+
+                select: {
+                  id: true,
+                  name: true,
+                },
+              }
+            )
+          : [];
+
+      const categoryMap =
+        new Map(
+          categories.map(
+            (category) => [
+              category.id,
+              category.name,
+            ]
+          )
+        );
+
+      res.json({
+        data: grouped.map(
+          (item) => ({
+            categoryId:
+              item.categoryId,
+
+            categoryName:
+              categoryMap.get(
+                item.categoryId
+              ) ||
+              'Tanpa Kategori',
+
+            amount: Number(
+              item._sum.amount ||
+                0
+            ),
+          })
+        ),
+
+        filters: {
+          startDate:
+            startDate || null,
+
+          endDate:
+            endDate || null,
+        },
+      });
+    }
+  );
+
+/*
+|--------------------------------------------------------------------------
+| EXPORT
+|--------------------------------------------------------------------------
+*/
 
 module.exports = {
-
   getDashboard,
+
+  getAllowedAccountFilter,
+
+  getAllowedAccountWhere,
 
   reportIncome,
 
@@ -918,7 +1997,4 @@ module.exports = {
   reportCashflow,
 
   reportTopExpenseCategory,
-
-  getAllowedAccountFilter,
-
 };

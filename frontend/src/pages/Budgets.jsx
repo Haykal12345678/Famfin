@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import { formatRupiah } from '../utils/format';
+import LoadingOverlay from '../components/LoadingOverlay';
+import ConfirmModal from '../components/ConfirmModal';
 
 const STATUS_STYLE = {
   AMAN: 'bg-emerald-50 text-emerald-700 border-emerald-100',
@@ -30,8 +32,7 @@ function getDefaultPeriod() {
 }
 
 function formatAmountInput(value) {
-  const numeric = String(value || '')
-    .replace(/\D/g, '');
+  const numeric = String(value || '').replace(/\D/g, '');
 
   if (!numeric) return '';
 
@@ -47,33 +48,17 @@ function parseAmount(value) {
 }
 
 function getProgressColor(percentage) {
-  if (percentage > 100) {
-    return 'bg-red-500';
-  }
-
-  if (percentage >= 90) {
-    return 'bg-orange-500';
-  }
-
-  if (percentage >= 70) {
-    return 'bg-yellow-500';
-  }
+  if (percentage > 100) return 'bg-red-500';
+  if (percentage >= 90) return 'bg-orange-500';
+  if (percentage >= 70) return 'bg-yellow-500';
 
   return 'bg-emerald-500';
 }
 
 function getProgressText(percentage) {
-  if (percentage > 100) {
-    return 'text-red-600';
-  }
-
-  if (percentage >= 90) {
-    return 'text-orange-600';
-  }
-
-  if (percentage >= 70) {
-    return 'text-yellow-600';
-  }
+  if (percentage > 100) return 'text-red-600';
+  if (percentage >= 90) return 'text-orange-600';
+  if (percentage >= 70) return 'text-yellow-600';
 
   return 'text-emerald-600';
 }
@@ -86,26 +71,95 @@ export default function Budgets() {
   const [budgets, setBudgets] = useState([]);
   const [categories, setCategories] = useState([]);
 
-  const [form, setForm] =
-    useState(EMPTY_FORM);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [editingBudget, setEditingBudget] = useState(null);
 
-  const [editingBudget, setEditingBudget] =
-    useState(null);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
 
-  const [error, setError] =
+  /*
+   * =========================================================
+   * PAGE LOADING
+   * =========================================================
+   */
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  /*
+   * =========================================================
+   * PROCESSING
+   *
+   * Semua CREATE / UPDATE / DELETE menggunakan
+   * processing generic:
+   *
+   * "Memproses Data"
+   *
+   * Bukan:
+   * - Membuat Budget
+   * - Memperbarui Budget
+   * - Menghapus Budget
+   * =========================================================
+   */
+
+  const [processing, setProcessing] = useState(false);
+
+  const processingTitle = 'Memproses Data';
+
+  const processingMessage =
+    'Sedang memproses perubahan data. Mohon tunggu sebentar...';
+
+  const [currentAction, setCurrentAction] =
     useState('');
 
-  const [loading, setLoading] =
-    useState(true);
+  /*
+   * =========================================================
+   * CONFIRM MODAL
+   * =========================================================
+   */
 
-  const [saving, setSaving] =
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const [confirmData, setConfirmData] = useState({
+    title: '',
+    message: '',
+    type: '',
+    budget: null,
+  });
+
+  /*
+   * =========================================================
+   * SUCCESS POPUP
+   * =========================================================
+   */
+
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const [successData, setSuccessData] = useState({
+    title: '',
+    message: '',
+    shouldRefresh: false,
+  });
+
+  /*
+   * =========================================================
+   * ERROR POPUP
+   * =========================================================
+   */
+
+  const [showErrorPopup, setShowErrorPopup] =
     useState(false);
 
-  const [refreshing, setRefreshing] =
-    useState(false);
+  const [errorData, setErrorData] = useState({
+    title: 'Gagal',
+    message: '',
+  });
 
-  const [search, setSearch] =
-    useState('');
+  /*
+   * =========================================================
+   * LOAD DATA
+   * =========================================================
+   */
 
   const load = async (isRefresh = false) => {
     try {
@@ -115,29 +169,33 @@ export default function Budgets() {
         setLoading(true);
       }
 
-      const [
-        budgetsRes,
-        categoriesRes,
-      ] = await Promise.all([
-        api.get('/budgets', {
-          params: { period },
-        }),
+      const [budgetsRes, categoriesRes] =
+        await Promise.all([
+          api.get('/budgets', {
+            params: {
+              period,
+            },
+          }),
 
-        api.get('/categories', {
-          params: {
-            type: 'EXPENSE',
-          },
-        }),
-      ]);
+          api.get('/categories', {
+            params: {
+              type: 'EXPENSE',
+            },
+          }),
+        ]);
 
-      setBudgets(
-        budgetsRes.data || []
-      );
+      const loadedBudgets =
+        Array.isArray(budgetsRes.data)
+          ? budgetsRes.data
+          : [];
 
-      setCategories(
-        categoriesRes.data || []
-      );
+      const loadedCategories =
+        Array.isArray(categoriesRes.data)
+          ? categoriesRes.data
+          : [];
 
+      setBudgets(loadedBudgets);
+      setCategories(loadedCategories);
       setError('');
     } catch (err) {
       console.error(
@@ -145,88 +203,406 @@ export default function Budgets() {
         err
       );
 
-      setError(
-        err.response?.data?.message ||
-          'Gagal memuat data budget.'
-      );
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        'Gagal memuat data budget.';
+
+      setError(message);
+
+      if (!isRefresh) {
+        setErrorData({
+          title: 'Gagal Memuat Budget',
+          message,
+        });
+
+        setShowErrorPopup(true);
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isRefresh) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    load();
+    load(false);
   }, [period]);
 
-  const submit = async (e) => {
-    e.preventDefault();
+  /*
+   * =========================================================
+   * PROCESSING
+   * =========================================================
+   */
 
-    setError('');
+  const startProcessing = (action) => {
+    setCurrentAction(action);
+    setProcessing(true);
+  };
 
-    const amount = parseAmount(
-      form.amount
-    );
+  const resetProcessing = () => {
+    setProcessing(false);
+    setCurrentAction('');
+  };
 
-    if (!form.categoryId) {
-      setError(
-        'Silakan pilih kategori terlebih dahulu.'
-      );
-      return;
-    }
+  /*
+   * =========================================================
+   * SUCCESS
+   * =========================================================
+   */
 
-    if (!amount || amount <= 0) {
-      setError(
-        'Nominal budget harus lebih dari 0.'
-      );
-      return;
-    }
+  const showActionSuccess = (
+    title,
+    message,
+    shouldRefresh = true
+  ) => {
+    setSuccessData({
+      title,
+      message,
+      shouldRefresh,
+    });
 
-    setSaving(true);
+    setShowSuccess(true);
+  };
 
-    try {
-      if (editingBudget) {
-        await api.patch(
-          `/budgets/${editingBudget.id}`,
-          {
-            amount,
-          }
-        );
-      } else {
-        await api.post('/budgets', {
-          categoryId: form.categoryId,
-          period,
-          amount,
-        });
-      }
+  /*
+   * =========================================================
+   * CLOSE SUCCESS
+   *
+   * Popup ditutup terlebih dahulu.
+   * Setelah itu baru refresh background.
+   * =========================================================
+   */
 
-      setForm(EMPTY_FORM);
-      setEditingBudget(null);
+  const closeSuccess = () => {
+    setShowSuccess(false);
 
-      await load(true);
-    } catch (err) {
-      console.error(
-        'Gagal menyimpan budget:',
-        err
-      );
-
-      setError(
-        err.response?.data?.message ||
-          'Gagal menyimpan budget.'
-      );
-    } finally {
-      setSaving(false);
+    if (successData.shouldRefresh) {
+      load(true);
     }
   };
 
+  /*
+   * =========================================================
+   * ERROR
+   * =========================================================
+   */
+
+  const showActionError = (
+    title,
+    message
+  ) => {
+    setErrorData({
+      title: title || 'Gagal',
+      message:
+        message ||
+        'Terjadi kesalahan saat memproses data.',
+    });
+
+    setShowErrorPopup(true);
+  };
+
+  /*
+   * =========================================================
+   * SUBMIT FORM
+   *
+   * Validation
+   * ↓
+   * Confirm Modal
+   * =========================================================
+   */
+
+  const submit = (e) => {
+    e.preventDefault();
+
+    if (processing) {
+      return;
+    }
+
+    setError('');
+
+    const amount = parseAmount(form.amount);
+
+    /*
+     * VALIDASI CATEGORY
+     */
+
+    if (!form.categoryId) {
+      const message =
+        'Silakan pilih kategori terlebih dahulu.';
+
+      setError(message);
+
+      setErrorData({
+        title: 'Data Belum Lengkap',
+        message,
+      });
+
+      setShowErrorPopup(true);
+
+      return;
+    }
+
+    /*
+     * VALIDASI NOMINAL
+     */
+
+    if (!amount || amount <= 0) {
+      const message =
+        'Nominal budget harus lebih dari 0.';
+
+      setError(message);
+
+      setErrorData({
+        title: 'Nominal Tidak Valid',
+        message,
+      });
+
+      setShowErrorPopup(true);
+
+      return;
+    }
+
+    /*
+     * =======================================================
+     * UPDATE
+     * =======================================================
+     */
+
+    if (editingBudget) {
+      setConfirmData({
+        title: 'Perbarui Budget?',
+        message: `Apakah kamu yakin ingin memperbarui budget "${editingBudget.category?.name || 'kategori ini'}" menjadi ${formatRupiah(
+          amount
+        )}?`,
+        type: 'UPDATE',
+        budget: {
+          ...editingBudget,
+          newAmount: amount,
+        },
+      });
+
+      setShowConfirm(true);
+
+      return;
+    }
+
+    /*
+     * =======================================================
+     * CREATE
+     * =======================================================
+     */
+
+    const category = categories.find(
+      (item) =>
+        String(item.id) ===
+        String(form.categoryId)
+    );
+
+    setConfirmData({
+      title: 'Buat Budget Baru?',
+      message: `Apakah kamu yakin ingin membuat budget untuk kategori "${category?.name || 'kategori ini'}" sebesar ${formatRupiah(
+        amount
+      )}?`,
+      type: 'CREATE',
+      budget: {
+        categoryId: form.categoryId,
+        categoryName:
+          category?.name || 'Kategori',
+        amount,
+      },
+    });
+
+    setShowConfirm(true);
+  };
+
+  /*
+   * =========================================================
+   * CONFIRM SUBMIT
+   *
+   * Confirm Modal
+   * ↓
+   * LoadingOverlay
+   * ↓
+   * API
+   * ↓
+   * Success / Error
+   * =========================================================
+   */
+
+  const confirmSubmit = async () => {
+    if (
+      !confirmData?.type ||
+      processing
+    ) {
+      return;
+    }
+
+    const type = confirmData.type;
+    const budget = confirmData.budget;
+
+    /*
+     * Tutup Confirm Modal
+     */
+
+    setShowConfirm(false);
+
+    /*
+     * START PROCESSING
+     *
+     * Selalu generic:
+     * "Memproses Data"
+     */
+
+    startProcessing(type);
+
+    try {
+      /*
+       * =====================================================
+       * CREATE
+       * =====================================================
+       */
+
+      if (type === 'CREATE') {
+        await api.post('/budgets', {
+          categoryId: budget.categoryId,
+          period,
+          amount: budget.amount,
+        });
+
+        setForm(EMPTY_FORM);
+        setEditingBudget(null);
+
+        resetProcessing();
+
+        showActionSuccess(
+          'Berhasil',
+          `Budget "${budget.categoryName}" berhasil dibuat sebesar ${formatRupiah(
+            budget.amount
+          )}.`,
+          true
+        );
+
+        return;
+      }
+
+      /*
+       * =====================================================
+       * UPDATE
+       * =====================================================
+       */
+
+      if (type === 'UPDATE') {
+        await api.patch(
+          `/budgets/${budget.id}`,
+          {
+            amount: budget.newAmount,
+          }
+        );
+
+        setForm(EMPTY_FORM);
+        setEditingBudget(null);
+
+        resetProcessing();
+
+        showActionSuccess(
+          'Berhasil',
+          `Budget "${budget.category?.name || 'kategori ini'}" berhasil diperbarui menjadi ${formatRupiah(
+            budget.newAmount
+          )}.`,
+          true
+        );
+
+        return;
+      }
+
+      /*
+       * =====================================================
+       * DELETE
+       * =====================================================
+       */
+
+      if (type === 'DELETE') {
+        await api.delete(
+          `/budgets/${budget.id}`
+        );
+
+        resetProcessing();
+
+        showActionSuccess(
+          'Berhasil',
+          `Budget "${budget.category?.name || 'kategori ini'}" berhasil dihapus.`,
+          true
+        );
+
+        return;
+      }
+
+      resetProcessing();
+    } catch (err) {
+      console.error(
+        'Budget action error:',
+        err
+      );
+
+      resetProcessing();
+
+      const status =
+        err?.response?.status;
+
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        'Gagal memproses budget.';
+
+      let title =
+        'Gagal Memproses Budget';
+
+      if (status === 400) {
+        title = 'Data Tidak Valid';
+      } else if (status === 409) {
+        title = 'Data Duplikat';
+      } else if (status === 401) {
+        title = 'Tidak Terautentikasi';
+      } else if (status === 403) {
+        title = 'Akses Ditolak';
+      } else if (status === 404) {
+        title = 'Data Tidak Ditemukan';
+      } else if (status === 422) {
+        title = 'Validasi Gagal';
+      } else if (status >= 500) {
+        title = 'Server Bermasalah';
+      }
+
+      showActionError(
+        title,
+        message
+      );
+    }
+  };
+
+  /*
+   * =========================================================
+   * EDIT
+   * =========================================================
+   */
+
   const editBudget = (budget) => {
+    if (processing) {
+      return;
+    }
+
     setEditingBudget(budget);
 
     setForm({
-      categoryId: budget.categoryId,
-      amount: formatAmountInput(
-        budget.amount
-      ),
+      categoryId:
+        budget.categoryId,
+      amount:
+        formatAmountInput(
+          budget.amount
+        ),
     });
 
     setError('');
@@ -237,61 +613,91 @@ export default function Budgets() {
     });
   };
 
+  /*
+   * =========================================================
+   * CANCEL EDIT
+   * =========================================================
+   */
+
   const cancelEdit = () => {
+    if (processing) {
+      return;
+    }
+
     setEditingBudget(null);
     setForm(EMPTY_FORM);
     setError('');
   };
 
-  const removeBudget = async (id) => {
-    const confirmed = window.confirm(
-      'Hapus budget ini? Data budget akan dihapus dari periode tersebut.'
-    );
+  /*
+   * =========================================================
+   * DELETE
+   * =========================================================
+   */
 
-    if (!confirmed) return;
-
-    try {
-      await api.delete(
-        `/budgets/${id}`
-      );
-
-      await load(true);
-    } catch (err) {
-      setError(
-        err.response?.data?.message ||
-          'Gagal menghapus budget.'
-      );
+  const removeBudget = (budget) => {
+    if (processing) {
+      return;
     }
+
+    setConfirmData({
+      title: 'Hapus Budget?',
+      message: `Apakah kamu yakin ingin menghapus budget "${budget.category?.name || 'kategori ini'}"? Data budget pada periode ${period} akan dihapus secara permanen.`,
+      type: 'DELETE',
+      budget,
+    });
+
+    setShowConfirm(true);
   };
 
+  /*
+   * =========================================================
+   * FILTER
+   * =========================================================
+   */
+
   const filteredBudgets = useMemo(() => {
-    const keyword = search
-      .trim()
-      .toLowerCase();
+    const keyword =
+      search.trim().toLowerCase();
 
     if (!keyword) {
       return budgets;
     }
 
-    return budgets.filter((budget) =>
-      budget.category?.name
-        ?.toLowerCase()
-        .includes(keyword)
+    return budgets.filter(
+      (budget) =>
+        budget.category?.name
+          ?.toLowerCase()
+          .includes(keyword)
     );
   }, [budgets, search]);
 
-  const summary = useMemo(() => {
-    const totalBudget = budgets.reduce(
-      (sum, budget) =>
-        sum + Number(budget.amount || 0),
-      0
-    );
+  /*
+   * =========================================================
+   * SUMMARY
+   * =========================================================
+   */
 
-    const totalUsed = budgets.reduce(
-      (sum, budget) =>
-        sum + Number(budget.used || 0),
-      0
-    );
+  const summary = useMemo(() => {
+    const totalBudget =
+      budgets.reduce(
+        (sum, budget) =>
+          sum +
+          Number(
+            budget.amount || 0
+          ),
+        0
+      );
+
+    const totalUsed =
+      budgets.reduce(
+        (sum, budget) =>
+          sum +
+          Number(
+            budget.used || 0
+          ),
+        0
+      );
 
     const totalRemaining =
       budgets.reduce(
@@ -303,11 +709,12 @@ export default function Budgets() {
         0
       );
 
-    const exceeded = budgets.filter(
-      (budget) =>
-        budget.status ===
-        'MELEBIHI_BUDGET'
-    ).length;
+    const exceeded =
+      budgets.filter(
+        (budget) =>
+          budget.status ===
+          'MELEBIHI_BUDGET'
+      ).length;
 
     return {
       totalBudget,
@@ -318,14 +725,23 @@ export default function Budgets() {
   }, [budgets]);
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+
+      {/* =====================================================
+          PROCESSING OVERLAY
+      ===================================================== */}
+
+      <LoadingOverlay
+        loading={processing}
+        title={processingTitle}
+        message={processingMessage}
+      />
 
       {/* =====================================================
           HEADER
       ===================================================== */}
 
       <section className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
-
         <div className="relative p-6 lg:p-7">
 
           <div className="pointer-events-none absolute -right-10 -top-20 h-56 w-56 rounded-full bg-blue-50/70 blur-3xl" />
@@ -333,7 +749,6 @@ export default function Budgets() {
           <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
 
             <div>
-
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                 Budget
               </h1>
@@ -343,7 +758,6 @@ export default function Budgets() {
                 kategori dan pantau penggunaannya
                 sepanjang periode.
               </p>
-
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -360,6 +774,7 @@ export default function Budgets() {
                     e.target.value
                   )
                 }
+                disabled={processing}
                 className="
                   h-[44px]
                   rounded-xl
@@ -376,6 +791,8 @@ export default function Budgets() {
                   focus:border-blue-500
                   focus:ring-4
                   focus:ring-blue-50
+                  disabled:cursor-not-allowed
+                  disabled:bg-slate-50
                 "
               />
 
@@ -384,7 +801,10 @@ export default function Budgets() {
                 onClick={() =>
                   load(true)
                 }
-                disabled={refreshing}
+                disabled={
+                  refreshing ||
+                  processing
+                }
                 className="
                   inline-flex
                   h-[44px]
@@ -412,11 +832,8 @@ export default function Budgets() {
             </div>
 
           </div>
-
         </div>
-
       </section>
-
 
       {/* =====================================================
           SUMMARY
@@ -460,14 +877,13 @@ export default function Budgets() {
         <SummaryCard
           label="Melewati Budget"
           value={summary.exceeded}
-          description="Kategori yang sudah melebihi batas"
+          description="Kategori yang melebihi batas"
           icon="!"
           iconBg="bg-red-50"
           iconText="text-red-600"
         />
 
       </section>
-
 
       {/* =====================================================
           FORM
@@ -505,7 +921,11 @@ export default function Budgets() {
 
               <p className="mt-1 text-sm text-slate-500">
                 {editingBudget
-                  ? `Perbarui batas budget untuk ${editingBudget.category?.name || 'kategori ini'}.`
+                  ? `Perbarui batas budget untuk ${
+                      editingBudget.category
+                        ?.name ||
+                      'kategori ini'
+                    }.`
                   : 'Tentukan batas pengeluaran untuk kategori pada periode yang dipilih.'}
               </p>
 
@@ -515,10 +935,9 @@ export default function Budgets() {
 
         </div>
 
-
         <div className="grid grid-cols-1 gap-5 p-5 sm:p-6 lg:grid-cols-[1.5fr_1fr_auto] lg:items-end">
 
-          {/* Category */}
+          {/* CATEGORY */}
 
           <div>
 
@@ -531,7 +950,10 @@ export default function Budgets() {
 
             <select
               required
-              disabled={!!editingBudget}
+              disabled={
+                !!editingBudget ||
+                processing
+              }
               className="
                 h-[44px]
                 w-full
@@ -581,8 +1003,7 @@ export default function Budgets() {
 
           </div>
 
-
-          {/* Amount */}
+          {/* AMOUNT */}
 
           <div>
 
@@ -604,6 +1025,7 @@ export default function Budgets() {
                 inputMode="numeric"
                 required
                 placeholder="0"
+                disabled={processing}
                 className="
                   h-[44px]
                   w-full
@@ -624,6 +1046,8 @@ export default function Budgets() {
                   focus:border-blue-500
                   focus:ring-4
                   focus:ring-blue-50
+                  disabled:cursor-not-allowed
+                  disabled:bg-slate-50
                 "
                 value={form.amount}
                 onChange={(e) =>
@@ -641,8 +1065,7 @@ export default function Budgets() {
 
           </div>
 
-
-          {/* Actions */}
+          {/* ACTIONS */}
 
           <div className="flex gap-2 lg:pb-0">
 
@@ -650,6 +1073,7 @@ export default function Budgets() {
               <button
                 type="button"
                 onClick={cancelEdit}
+                disabled={processing}
                 className="
                   h-[44px]
                   rounded-xl
@@ -662,6 +1086,8 @@ export default function Budgets() {
                   text-slate-700
                   transition
                   hover:bg-slate-100
+                  disabled:cursor-not-allowed
+                  disabled:opacity-50
                 "
               >
                 Batal
@@ -670,7 +1096,7 @@ export default function Budgets() {
 
             <button
               type="submit"
-              disabled={saving}
+              disabled={processing}
               className="
                 h-[44px]
                 whitespace-nowrap
@@ -689,15 +1115,12 @@ export default function Budgets() {
                 disabled:opacity-60
               "
             >
-              {saving
-                ? 'Menyimpan...'
-                : editingBudget
+              {editingBudget
                 ? 'Perbarui Budget'
                 : '+ Buat Budget'}
             </button>
 
           </div>
-
 
           {error && (
             <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600 lg:col-span-3">
@@ -708,8 +1131,9 @@ export default function Budgets() {
         </div>
 
       </form>
-            {/* =====================================================
-          BUDGET LIST HEADER
+
+      {/* =====================================================
+          BUDGET LIST
       ===================================================== */}
 
       <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -717,6 +1141,7 @@ export default function Budgets() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
 
           <div>
+
             <p className="text-sm font-semibold text-slate-800">
               Budget Periode {period}
             </p>
@@ -724,6 +1149,7 @@ export default function Budgets() {
             <p className="mt-1 text-xs text-slate-400">
               Pantau penggunaan budget setiap kategori.
             </p>
+
           </div>
 
           <div className="w-full lg:w-72">
@@ -742,9 +1168,12 @@ export default function Budgets() {
                 type="text"
                 value={search}
                 onChange={(e) =>
-                  setSearch(e.target.value)
+                  setSearch(
+                    e.target.value
+                  )
                 }
                 placeholder="Cari budget..."
+                disabled={processing}
                 className="
                   h-[42px]
                   w-full
@@ -763,6 +1192,8 @@ export default function Budgets() {
                   focus:border-blue-500
                   focus:ring-4
                   focus:ring-blue-50
+                  disabled:cursor-not-allowed
+                  disabled:bg-slate-50
                 "
               />
 
@@ -772,11 +1203,6 @@ export default function Budgets() {
 
         </div>
 
-
-        {/* =================================================
-            CONTENT
-        ================================================= */}
-
         <div className="mt-6">
 
           {loading ? (
@@ -784,7 +1210,9 @@ export default function Budgets() {
           ) : filteredBudgets.length === 0 ? (
             <EmptyBudgets
               hasSearch={!!search}
-              onReset={() => setSearch('')}
+              onReset={() =>
+                setSearch('')
+              }
             />
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -796,6 +1224,12 @@ export default function Budgets() {
                     budget={budget}
                     onEdit={editBudget}
                     onRemove={removeBudget}
+                    processing={
+                      processing
+                    }
+                    currentAction={
+                      currentAction
+                    }
                   />
                 )
               )}
@@ -807,14 +1241,74 @@ export default function Budgets() {
 
       </section>
 
+      {/* =====================================================
+          CONFIRM MODAL
+          
+          FINAL SCHEMA:
+          CREATE  -> variant="primary"
+          UPDATE  -> variant="primary"
+          DELETE  -> variant="danger"
+      ===================================================== */}
+
+      <ConfirmModal
+        open={showConfirm}
+        title={confirmData.title}
+        message={confirmData.message}
+        confirmText={
+          confirmData.type === 'DELETE'
+            ? 'Ya, Hapus'
+            : 'Ya, Lanjutkan'
+        }
+        cancelText="Batal"
+        onConfirm={confirmSubmit}
+        onCancel={() => {
+          if (processing) {
+            return;
+          }
+
+          setShowConfirm(false);
+        }}
+        loading={processing}
+        variant={
+          confirmData.type === 'DELETE'
+            ? 'danger'
+            : 'primary'
+        }
+      />
+
+      {/* =====================================================
+          SUCCESS POPUP
+      ===================================================== */}
+
+      {showSuccess && (
+        <SuccessPopup
+          title={successData.title}
+          message={successData.message}
+          onClose={closeSuccess}
+        />
+      )}
+
+      {/* =====================================================
+          ERROR POPUP
+      ===================================================== */}
+
+      {showErrorPopup && (
+        <ErrorPopup
+          title={errorData.title}
+          message={errorData.message}
+          onClose={() =>
+            setShowErrorPopup(false)
+          }
+        />
+      )}
+
     </div>
   );
 }
 
-
-// =========================================================
-// SUMMARY CARD
-// =========================================================
+/* =========================================================
+   SUMMARY CARD
+========================================================= */
 
 function SummaryCard({
   label,
@@ -901,16 +1395,21 @@ function SummaryCard({
   );
 }
 
-
-// =========================================================
-// BUDGET CARD
-// =========================================================
+/* =========================================================
+   BUDGET CARD
+========================================================= */
 
 function BudgetCard({
   budget,
   onEdit,
   onRemove,
+  processing,
+  currentAction,
 }) {
+  const amount = Number(
+    budget.amount || 0
+  );
+
   const percentage = Number(
     budget.percentage || 0
   );
@@ -920,20 +1419,37 @@ function BudgetCard({
     100
   );
 
+  const status =
+    budget.status;
+
   const statusStyle =
-    STATUS_STYLE[budget.status] ||
+    STATUS_STYLE[status] ||
     STATUS_STYLE.AMAN;
 
   const statusLabel =
-    STATUS_LABEL[budget.status] ||
-    budget.status ||
+    STATUS_LABEL[status] ||
+    status ||
     'Aman';
 
   const progressColor =
-    getProgressColor(percentage);
+    getProgressColor(
+      percentage
+    );
 
   const progressText =
-    getProgressText(percentage);
+    getProgressText(
+      percentage
+    );
+
+  const isThisDelete =
+    processing &&
+    currentAction ===
+      'DELETE';
+
+  const isThisEdit =
+    processing &&
+    currentAction ===
+      'UPDATE';
 
   return (
     <div
@@ -952,9 +1468,7 @@ function BudgetCard({
       "
     >
 
-      {/* =================================================
-          CARD HEADER
-      ================================================= */}
+      {/* HEADER */}
 
       <div className="border-b border-slate-100 p-5">
 
@@ -1002,7 +1516,6 @@ function BudgetCard({
 
           </div>
 
-
           <span
             className={`
               shrink-0
@@ -1022,10 +1535,7 @@ function BudgetCard({
 
       </div>
 
-
-      {/* =================================================
-          PROGRESS
-      ================================================= */}
+      {/* PROGRESS */}
 
       <div className="p-5">
 
@@ -1056,7 +1566,6 @@ function BudgetCard({
 
         </div>
 
-
         <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
 
           <div
@@ -1074,18 +1583,13 @@ function BudgetCard({
 
         </div>
 
-
-        {/* =================================================
-            AMOUNT DETAILS
-        ================================================= */}
+        {/* AMOUNT */}
 
         <div className="mt-5 space-y-3">
 
           <AmountRow
             label="Budget"
-            value={formatRupiah(
-              budget.amount
-            )}
+            value={formatRupiah(amount)}
           />
 
           <AmountRow
@@ -1121,18 +1625,16 @@ function BudgetCard({
 
         </div>
 
+        {/* ACTIONS */}
 
-        {/* =================================================
-            ACTIONS
-        ================================================= */}
-
-        <div className="mt-5 flex gap-2">
+        <div className="mt-5 flex flex-wrap gap-2">
 
           <button
             type="button"
             onClick={() =>
               onEdit(budget)
             }
+            disabled={processing}
             className="
               flex-1
               rounded-xl
@@ -1146,16 +1648,21 @@ function BudgetCard({
               text-blue-700
               transition
               hover:bg-blue-100
+              disabled:cursor-not-allowed
+              disabled:opacity-50
             "
           >
-            Edit Budget
+            {isThisEdit
+              ? 'Memproses...'
+              : 'Edit Budget'}
           </button>
 
           <button
             type="button"
             onClick={() =>
-              onRemove(budget.id)
+              onRemove(budget)
             }
+            disabled={processing}
             className="
               rounded-xl
               border
@@ -1168,9 +1675,13 @@ function BudgetCard({
               text-red-600
               transition
               hover:bg-red-100
+              disabled:cursor-not-allowed
+              disabled:opacity-50
             "
           >
-            Hapus
+            {isThisDelete
+              ? 'Menghapus...'
+              : 'Hapus'}
           </button>
 
         </div>
@@ -1181,10 +1692,9 @@ function BudgetCard({
   );
 }
 
-
-// =========================================================
-// AMOUNT ROW
-// =========================================================
+/* =========================================================
+   AMOUNT ROW
+========================================================= */
 
 function AmountRow({
   label,
@@ -1217,10 +1727,9 @@ function AmountRow({
   );
 }
 
-
-// =========================================================
-// BUDGET SKELETON
-// =========================================================
+/* =========================================================
+   BUDGET SKELETON
+========================================================= */
 
 function BudgetSkeleton() {
   return (
@@ -1322,9 +1831,10 @@ function BudgetSkeleton() {
     </div>
   );
 }
-// =========================================================
-// EMPTY BUDGETS
-// =========================================================
+
+/* =========================================================
+   EMPTY BUDGETS
+========================================================= */
 
 function EmptyBudgets({
   hasSearch,
@@ -1349,8 +1859,6 @@ function EmptyBudgets({
       "
     >
 
-      {/* Icon */}
-
       <div
         className="
           flex
@@ -1371,9 +1879,6 @@ function EmptyBudgets({
         Rp
       </div>
 
-
-      {/* Title */}
-
       <h3 className="mt-4 text-sm font-bold text-slate-800">
 
         {hasSearch
@@ -1382,9 +1887,6 @@ function EmptyBudgets({
 
       </h3>
 
-
-      {/* Description */}
-
       <p className="mt-1 max-w-sm text-xs leading-5 text-slate-400">
 
         {hasSearch
@@ -1392,9 +1894,6 @@ function EmptyBudgets({
           : 'Belum ada budget untuk periode ini. Buat budget pertama untuk mulai mengontrol pengeluaran.'}
 
       </p>
-
-
-      {/* Reset */}
 
       {hasSearch && (
         <button
@@ -1423,7 +1922,412 @@ function EmptyBudgets({
   );
 }
 
+/* =========================================================
+   SUCCESS POPUP
+ *
+ * FINAL FAMFIN SUCCESS POPUP SCHEMA
+ *
+ * - White rounded modal
+ * - Green circular check
+ * - Animated check
+ * - Dynamic title
+ * - Dynamic message
+ * - Status kecil:
+ *     "Perubahan berhasil disimpan"
+ * - Full width button:
+ *     "Selesai"
+ * - Bottom green progress bar
+ * - Progress bergerak KIRI -> KANAN
+ * - BUKAN countdown shrink
+ * - Refresh hanya setelah popup ditutup
+ * ========================================================= */
 
-// =========================================================
-// END OF BUDGETS.JSX
-// =========================================================
+function SuccessPopup({
+  title,
+  message,
+  onClose,
+}) {
+  return (
+    <>
+      <style>
+        {`
+          @keyframes famfinSuccessBackdrop {
+            from {
+              opacity: 0;
+            }
+
+            to {
+              opacity: 1;
+            }
+          }
+
+          @keyframes famfinSuccessModal {
+            from {
+              opacity: 0;
+              transform: translateY(12px) scale(0.96);
+            }
+
+            to {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          @keyframes famfinSuccessIcon {
+            0% {
+              opacity: 0;
+              transform: scale(0.65);
+            }
+
+            65% {
+              opacity: 1;
+              transform: scale(1.08);
+            }
+
+            100% {
+              opacity: 1;
+              transform: scale(1);
+            }
+          }
+
+          @keyframes famfinSuccessCheck {
+            from {
+              stroke-dashoffset: 32;
+            }
+
+            to {
+              stroke-dashoffset: 0;
+            }
+          }
+
+          @keyframes famfinSuccessProgress {
+            from {
+              transform: scaleX(0);
+            }
+
+            to {
+              transform: scaleX(1);
+            }
+          }
+        `}
+      </style>
+
+      <div
+        className="
+          fixed
+          inset-0
+          z-[10000]
+          flex
+          items-center
+          justify-center
+          bg-slate-900/30
+          px-4
+          backdrop-blur-[2px]
+        "
+        style={{
+          animation:
+            'famfinSuccessBackdrop 180ms ease-out forwards',
+        }}
+      >
+
+        <div
+          className="
+            w-full
+            max-w-md
+            overflow-hidden
+            rounded-[1.5rem]
+            border
+            border-slate-200
+            bg-white
+            shadow-2xl
+            ring-1
+            ring-black/5
+          "
+          style={{
+            animation:
+              'famfinSuccessModal 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards',
+          }}
+        >
+
+          <div className="px-6 pb-6 pt-7 sm:px-7">
+
+            {/* SUCCESS ICON */}
+
+            <div className="flex justify-center">
+
+              <div
+                className="
+                  flex
+                  h-16
+                  w-16
+                  items-center
+                  justify-center
+                  rounded-full
+                  bg-emerald-50
+                  ring-8
+                  ring-emerald-50/50
+                "
+                style={{
+                  animation:
+                    'famfinSuccessIcon 420ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both',
+                }}
+              >
+
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  className="h-8 w-8 text-emerald-600"
+                >
+
+                  <path
+                    d="M5 12.5l4 4L19 6.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeDasharray="32"
+                    strokeDashoffset="32"
+                    style={{
+                      animation:
+                        'famfinSuccessCheck 420ms ease-out 220ms forwards',
+                    }}
+                  />
+
+                </svg>
+
+              </div>
+
+            </div>
+
+            {/* CONTENT */}
+
+            <div className="mt-5 text-center">
+
+              <h3 className="text-base font-bold text-slate-900">
+                {title}
+              </h3>
+
+
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                {message}
+              </p>
+
+
+              <div className="mt-3 inline-flex items-center gap-1.5">
+
+                <span
+                  className="
+                    flex
+                    h-4
+                    w-4
+                    items-center
+                    justify-center
+                    rounded-full
+                    bg-emerald-100
+                    text-emerald-600
+                  "
+                >
+
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    className="h-2.5 w-2.5"
+                  >
+
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M5 12.5l4 4L19 6.5"
+                    />
+
+                  </svg>
+
+                </span>
+
+
+                <span className="text-[11px] font-medium text-emerald-600">
+                  Perubahan berhasil disimpan
+                </span>
+
+              </div>
+
+            </div>
+
+            {/* ACTION */}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="
+                mt-6
+                w-full
+                rounded-xl
+                bg-emerald-600
+                px-4
+                py-3
+                text-sm
+                font-semibold
+                text-white
+                shadow-sm
+                transition
+                hover:bg-emerald-700
+                hover:shadow-md
+                active:scale-[0.99]
+              "
+            >
+              Selesai
+            </button>
+
+          </div>
+
+          {/* LEFT -> RIGHT PROGRESS */}
+
+          <div className="h-1.5 bg-emerald-50">
+
+            <div
+              className="
+                h-full
+                w-full
+                origin-left
+                bg-emerald-500
+              "
+              style={{
+                animation:
+                  'famfinSuccessProgress 3s linear forwards',
+              }}
+            />
+
+          </div>
+
+        </div>
+
+      </div>
+    </>
+  );
+}
+
+/* =========================================================
+   ERROR POPUP
+========================================================= */
+
+function ErrorPopup({
+  title,
+  message,
+  onClose,
+}) {
+  return (
+    <div
+      className="
+        fixed
+        inset-0
+        z-[10001]
+        flex
+        items-center
+        justify-center
+        bg-slate-900/30
+        px-4
+        backdrop-blur-[2px]
+      "
+    >
+
+      <div
+        className="
+          w-full
+          max-w-md
+          overflow-hidden
+          rounded-2xl
+          border
+          border-slate-200
+          bg-white
+          shadow-2xl
+          ring-1
+          ring-black/5
+        "
+      >
+
+        <div className="p-6">
+
+          <div className="flex justify-center">
+
+            <div
+              className="
+                flex
+                h-14
+                w-14
+                items-center
+                justify-center
+                rounded-full
+                bg-red-50
+                text-red-600
+              "
+            >
+
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-7 w-7"
+              >
+
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 6l12 12M18 6L6 18"
+                />
+
+              </svg>
+
+            </div>
+
+          </div>
+
+          <div className="mt-4 text-center">
+
+            <h3 className="text-base font-bold text-slate-900">
+              {title}
+            </h3>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              {message}
+            </p>
+
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="
+              mt-6
+              w-full
+              rounded-xl
+              bg-red-600
+              px-4
+              py-2.5
+              text-sm
+              font-semibold
+              text-white
+              shadow-sm
+              transition
+              hover:bg-red-700
+              hover:shadow-md
+            "
+          >
+            Mengerti
+          </button>
+
+        </div>
+
+        <div className="h-1 bg-red-50">
+
+          <div className="h-full w-full bg-red-500" />
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
