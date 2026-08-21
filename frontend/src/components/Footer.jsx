@@ -22,42 +22,96 @@ export default function Footer({
         left: isDesktop ? sidebarWidth : 0,
       }}
     >
-      <div className="flex h-full items-center justify-between px-6">
+      <div
+        className="
+          flex
+          h-full
+          w-full
+          items-center
+          justify-between
+          gap-4
+          px-4
+          sm:px-6
+        "
+      >
 
-        {/* Left */}
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <span>© {new Date().getFullYear()}</span>
+        {/* =========================================================
+            LEFT
+        ========================================================= */}
+        <div
+          className="
+            flex
+            min-w-0
+            items-center
+            gap-1.5
+            text-xs
+            text-slate-500
+            sm:gap-2
+            sm:text-sm
+          "
+        >
+          {/* Copyright */}
+          <span className="shrink-0">
+            © {new Date().getFullYear()}
+          </span>
 
-          <span className="font-semibold text-brand-600">
+          {/* Brand */}
+          <span className="shrink-0 font-semibold text-brand-600">
             FamFin
           </span>
 
-          <span className="hidden lg:inline">
+          {/* Description - Desktop */}
+          <span className="hidden truncate lg:inline">
             • Family Finance Management System
           </span>
         </div>
 
-        {/* Right */}
-        <div className="hidden lg:flex items-center gap-2 text-sm text-slate-500">
-
+        {/* =========================================================
+            RIGHT
+        ========================================================= */}
+        <div
+          className="
+            hidden
+            shrink-0
+            items-center
+            gap-2
+            text-xs
+            text-slate-500
+            lg:flex
+            xl:text-sm
+          "
+        >
+          {/* Version */}
           <span>
             Version
           </span>
 
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+          <span
+            className="
+              rounded-full
+              bg-slate-100
+              px-2
+              py-0.5
+              font-medium
+              text-slate-600
+            "
+          >
             v1.0.0
           </span>
 
-          <span className="mx-1 text-slate-300">|</span>
+          {/* Separator */}
+          <span className="mx-1 text-slate-300">
+            |
+          </span>
 
+          {/* Created By */}
           <span>
-            Made with ❤️ by
+            Created by
           </span>
 
           <span className="font-semibold text-brand-600">
             FamFin Team
           </span>
-
         </div>
 
       </div>
